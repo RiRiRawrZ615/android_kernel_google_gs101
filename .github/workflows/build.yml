@@ -122,7 +122,7 @@ jobs:
           echo "Adding configuration settings to gs101_defconfig..."
           # Add KSU configuration settings
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
-          echo "CONFIG_KSU_WITH_KPROBES=n" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
           
           # Add SUSFS configuration settings
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
