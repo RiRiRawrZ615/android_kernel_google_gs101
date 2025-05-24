@@ -190,17 +190,9 @@ jobs:
           echo "Copying Image.lz4 and concatenating DTB files..."
           cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
           cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
-      - name: Create ZIP Files for Different Formats
-        run: |
-          echo "Navigating to AnyKernel3 directory..."
-          cd ./AnyKernel3
-          # Zip the files in the AnyKernel3 directory with a new naming convention
-          ZIP_NAME="BluRaviole_KSU_NEXT_DEV_SUSFS.zip"
-          echo "Creating zip file $ZIP_NAME..."
-          zip -r "../$ZIP_NAME" ./*
-          
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-gs101
-          path: BluRaviole_KSU_NEXT_DEV_SUSFS.zip
+          path: ./AnyKernel3/
