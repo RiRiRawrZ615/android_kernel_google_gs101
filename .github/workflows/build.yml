@@ -72,8 +72,19 @@ jobs:
           cd ./KernelSU-Next
           
           echo "Applying next SUSFS patches..."
-          cp ../../kernel_patches/next/0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next-v1.0.7.patch ./
-          patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next-v1.0.7.patch || true
+              cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+            patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+            cp ../../kernel_patches/next/fix_apk_sign.c.patch ./
+            patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+            cp ../../kernel_patches/next/fix_core_hook.c.patch ./
+            patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+            cp ../../kernel_patches/next/fix_selinux.c.patch ./
+            patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+            cp ../../kernel_patches/next/fix_ksud.c.patch ./
+            patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+            cp ../../kernel_patches/next/fix_sucompat.c.patch ./
+            patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+            sed -i '/bool ksu_devpts_hook = false;/d' ./kernel/sucompat.c        
           
           # Change to common directory and apply SUSFS patch
           cd ..
