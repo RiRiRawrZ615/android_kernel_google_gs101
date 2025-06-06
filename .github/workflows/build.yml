@@ -72,8 +72,8 @@ jobs:
           cd ./KernelSU-Next
           
           echo "Applying next SUSFS patches..."
-          cp ../../kernel_patches/next/0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next.patch ./
-          patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next.patch || true
+          cp ../../kernel_patches/next/0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next-v1.0.7.patch ./
+          patch -p1 --forward < 0001-kernel-patch-susfs-v1.5.7-to-KernelSU-Next-v1.0.7.patch || true
           
           # Change to common directory and apply SUSFS patch
           cd ..
