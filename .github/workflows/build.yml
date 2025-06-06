@@ -69,22 +69,21 @@ jobs:
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.10.patch ./
           cp ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          echo "Applying SUSFS patches for KernelSU-Next..."
           cd ./KernelSU-Next
-          
-          echo "Applying next SUSFS patches..."
-              cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-            patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-            cp ../../kernel_patches/next/fix_apk_sign.c.patch ./
-            patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
-            cp ../../kernel_patches/next/fix_core_hook.c.patch ./
-            patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
-            cp ../../kernel_patches/next/fix_selinux.c.patch ./
-            patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
-            cp ../../kernel_patches/next/fix_ksud.c.patch ./
-            patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
-            cp ../../kernel_patches/next/fix_sucompat.c.patch ./
-            patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
-            sed -i '/bool ksu_devpts_hook = false;/d' ./kernel/sucompat.c        
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          cp ../../kernel_patches/next/fix_apk_sign.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+          cp ../../kernel_patches/next/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+          cp ../../kernel_patches/next/fix_selinux.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+          cp ../../kernel_patches/next/fix_ksud.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+          cp ../../kernel_patches/next/fix_sucompat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+          sed -i '/bool ksu_devpts_hook = false;/d' ./kernel/sucompat.c
           
           # Change to common directory and apply SUSFS patch
           cd ..
