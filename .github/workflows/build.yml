@@ -47,7 +47,7 @@ jobs:
           # Clone repositories using the branch names
           git clone https://github.com/RiRiRawrZ615/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
-          git clone https://github.com/WildKernels/kernel_patches
+          git clone https://github.com/RiRiRawrZ615/kernel_patches
           git clone https://github.com/RiRiRawrZ615/android_kernel_google_gs101 -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
       
       - name: Add KernelSU
