@@ -58,6 +58,27 @@ jobs:
           echo "Adding KernelSU..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
       
+      - name: Extract KernelSU and SUSFS versions
+        id: extract_versions
+        run: |
+          echo "Extracting version information..."
+          cd "$CONFIG"
+          
+          # Extract KernelSU version
+          KSU_VERSION=$(grep -oP 'KERNELSU_VERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+          KSU_SUBVERSION=$(grep -oP 'KERNELSU_SUBVERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+          
+          # Extract SUSFS version
+          SUSFS_VERSION=$(grep -oP 'SUSFS_VERSION := \K.*' fs/susfs/version.mk | tr -d '[:space:]')
+          
+          echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_OUTPUT
+          echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_OUTPUT
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_OUTPUT
+          
+          echo "Versions extracted:"
+          echo "KernelSU: $KSU_VERSION-$KSU_SUBVERSION"
+          echo "SUSFS: $SUSFS_VERSION"
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -192,11 +213,6 @@ jobs:
           export CC=aarch64-linux-gcc
           make gs101_defconfig -j$(nproc --all)
           make -j$(nproc --all)
-      #- name: Upload Artifact
-      #  uses: actions/upload-artifact@v4
-      #  with:
-      #    name: my-artifact
-      #    path: android_kernel_google_gs101
 
       - name: Copy Images
         run: |
@@ -206,11 +222,17 @@ jobs:
           cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
           cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
 
+      - name: Create AnyKernel3 zip
+        run: |
+          cd AnyKernel3
+          zip -r ../gs101.zip *
+          cd ..
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-gs101
-          path: ./AnyKernel3/
+          path: ./gs101.zip
 
   trigger-release:
     runs-on: ubuntu-latest
@@ -220,13 +242,13 @@ jobs:
       REPO_OWNER: RiRiRawrZ615
       REPO_NAME: android_kernel_google_gs101
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "BluRaviole_KSU_${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} & SUSFS v1.5.9"
+      RELEASE_NAME: "BluRaviole_KSU_${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} & SUSFS v${{ needs.build-kernel-a14-gs101-kernelsu-susfs.outputs.SUSFS_VERSION }}"
       RELEASE_NOTES: |
-        This release contains KSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} and SUSFS v1.5.9
+        This release contains KSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} and SUSFS v${{ needs.build-kernel-a14-gs101-kernelsu-susfs.outputs.SUSFS_VERSION }}
         
         Features:
-        -> KernelSU-${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }}
-        -> SUSFS ඞ v1.5.9 
+        -> KernelSU-${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }} (v${{ needs.build-kernel-a14-gs101-kernelsu-susfs.outputs.KSU_VERSION }}-${{ needs.build-kernel-a14-gs101-kernelsu-susfs.outputs.KSU_SUBVERSION }})
+        -> SUSFS ඞ v${{ needs.build-kernel-a14-gs101-kernelsu-susfs.outputs.SUSFS_VERSION }}
         -> Manual Hooks for Better Hiding
         -> CASS (Capacity Aware Super Scheduler) Support
         -> Magic Mount Support
@@ -332,6 +354,7 @@ jobs:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
+          name: kernel-gs101
           path: ./downloaded-artifacts
           
       # Create GitHub Release and upload files if make_release is true
@@ -343,22 +366,18 @@ jobs:
           release_name: ${{ env.RELEASE_NAME }}  # Pass the RELEASE_NAME to the action
           body: ${{ env.RELEASE_NOTES }}  # Pass the RELEASE_NOTES to the action
 
-      - name: Upload Release Assets Dynamically
-        run: |
-          # Loop through all files in the downloaded-artifacts directory
-          for file in ./downloaded-artifacts/kernel-*/*; do
-              # Skip directories
-              if [ -d "$file" ]; then
-                  continue
-              fi
-
-              # Upload the file to the GitHub release
-              echo "Uploading $file..."
-              gh release upload ${{ env.NEW_TAG }} "$file"
-          done
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./downloaded-artifacts/gs101.zip
+          asset_name: gs101.zip
+          asset_content_type: application/zip
 
       # Display Files Uploaded
       - name: Display Files Uploaded
         run: |
           echo "GitHub release created with the following files:"
-          ls ./downloaded-artifacts/**/*
+          ls ./downloaded-artifacts/
