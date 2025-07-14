@@ -220,17 +220,15 @@ jobs:
       REPO_OWNER: RiRiRawrZ615
       REPO_NAME: android_kernel_google_gs101
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      RELEASE_NAME: "*VERMEER BUILD* GKI Kernels With KernelSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} & SUSFS v1.5.7 *VERMEER BUILD*"
+      RELEASE_NAME: "BluRaviole_KSU_${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} & SUSFS v1.5.9"
       RELEASE_NOTES: |
-        This release contains KernelSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} and SUSFS v1.5.7
+        This release contains KSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} and SUSFS v1.5.9
         
         Features:
         -> KernelSU-${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }}
-        -> SUSFS ඞ v1.5.7 
+        -> SUSFS ඞ v1.5.9 
         -> Manual Hooks for Better Hiding
-        -> Wireguard Support
-        -> Simple Maphide for LineageOS Detections
-        -> Futile Maphide for jit-zygote-cache Detections
+        -> CASS (Capacity Aware Super Scheduler) Support
         -> Magic Mount Support
         -> BBR Support
 
