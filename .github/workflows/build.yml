@@ -54,9 +54,12 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-          
-          echo "Adding KernelSU..."
+            
+          echo "Adding KernelSU Next..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          cd KernelSU-Next
+          git checkout 3fd61e0ee5ee5e6fe941a892924ac26aa752b618
+          cd ..
       
       - name: Extract KernelSU and SUSFS versions
         id: extract_versions
@@ -109,10 +112,7 @@ jobs:
           patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
 
           cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_rules.c.patch ./
-          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
-
-          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
-          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch          
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch        
       
       - name: Apply KSU Hooks
         run: |
