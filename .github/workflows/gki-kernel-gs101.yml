@@ -147,11 +147,7 @@ jobs:
           cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
           cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
-          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
-        # cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_sucompat.c.patch ./
-        # patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch || true 
-        # cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_kernel_compat.c.patch ./
-        # patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch || true 
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch 
           cd ..
 
       - name: Apply KSU Hooks
