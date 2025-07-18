@@ -59,37 +59,19 @@ jobs:
           ref: android-gs-bluraviole-5.10-android14-qpr2-monolithic
           fetch-depth: 1
           submodules: false
-          path: kernel_source
 
-      - name: Detect kernel source directory
+      - name: Verify checkout
         run: |
-          echo "Listing checkout directory contents:"
-          ls -la kernel_source
-          if [ -f "kernel_source/Makefile" ] && [ -d "kernel_source/arch/arm64/configs" ] && [ -f "kernel_source/arch/arm64/configs/gs101_defconfig" ] && [ -d "kernel_source/drivers" ]; then
-            echo "Kernel source found in kernel_source/"
-            echo "KERNEL_SRC_DIR=kernel_source" >> $GITHUB_ENV
-          elif [ -f "kernel_source/android_kernel_google_gs101/Makefile" ] && [ -d "kernel_source/android_kernel_google_gs101/arch/arm64/configs" ] && [ -f "kernel_source/android_kernel_google_gs101/arch/arm64/configs/gs101_defconfig" ] && [ -d "kernel_source/android_kernel_google_gs101/drivers" ]; then
-            echo "Kernel source found in kernel_source/android_kernel_google_gs101/"
-            echo "KERNEL_SRC_DIR=kernel_source/android_kernel_google_gs101" >> $GITHUB_ENV
-          else
-            KERNEL_SRC_DIR=$(find kernel_source -maxdepth 3 -type f -name "gs101_defconfig" -exec dirname {} \; | head -n 1)
-            if [ -z "$KERNEL_SRC_DIR" ]; then
-              echo "Error: Could not find kernel source directory with gs101_defconfig" >&2
-              exit 1
-            fi
-            KERNEL_SRC_DIR=$(dirname "$KERNEL_SRC_DIR")
-            if [ ! -d "$KERNEL_SRC_DIR/drivers" ]; then
-              echo "Error: 'drivers/' directory not found in $KERNEL_SRC_DIR" >&2
-              ls -la "$KERNEL_SRC_DIR"
-              exit 1
-            fi
-            echo "Kernel source found in $KERNEL_SRC_DIR"
-            echo "KERNEL_SRC_DIR=$KERNEL_SRC_DIR" >> $GITHUB_ENV
-          fi
-          echo "Current directory: $(pwd)"
-          cd "$KERNEL_SRC_DIR"
-          echo "Kernel source directory contents:"
+          echo "Listing working directory contents:"
           ls -la
+          if [ ! -f "Makefile" ] || [ ! -d "arch/arm64/configs" ] || [ ! -f "arch/arm64/configs/gs101_defconfig" ] || [ ! -d "drivers" ]; then
+            echo "Error: Kernel source files not found in working directory. Expected Makefile, arch/arm64/configs/gs101_defconfig, and drivers/." >&2
+            echo "Checking for nested structure:"
+            ls -la android_kernel_google_gs101 || echo "No android_kernel_google_gs101/ directory found"
+            exit 1
+          fi
+          echo "Kernel source files verified in working directory"
+          echo "KERNEL_SRC_DIR=." >> $GITHUB_ENV
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -186,7 +168,7 @@ jobs:
           }
           cd KernelSU-Next
           if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
-            echoing "Using latest KernelSU commit"
+            echo "Using latest KernelSU commit"
             git checkout $(git rev-parse origin/next)
           else
             echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
@@ -212,7 +194,7 @@ jobs:
           patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
           cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
+          cp ../../external_rek_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
           cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_rules.c.patch
