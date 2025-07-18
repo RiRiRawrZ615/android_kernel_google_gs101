@@ -46,33 +46,10 @@ jobs:
   build-kernel-gs101-kernelsu-susfs:
     runs-on: ubuntu-latest
     env:
-      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
-      CCACHE_NOHASHDIR: "true"
-      CCACHE_HARDLINK: "true"
       REPO_OWNER: RiRiRawrZ615
       REPO_NAME: android_kernel_google_gs101
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: android-gs-bluraviole-5.10-android14-qpr2-monolithic
-          fetch-depth: 1
-          submodules: false
-
-      - name: Verify checkout
-        run: |
-          echo "Listing working directory contents:"
-          ls -la
-          if [ ! -f "Makefile" ] || [ ! -d "arch/arm64/configs" ] || [ ! -f "arch/arm64/configs/gs101_defconfig" ] || [ ! -d "drivers" ]; then
-            echo "Error: Kernel source files not found in working directory. Expected Makefile, arch/arm64/configs/gs101_defconfig, and drivers/." >&2
-            echo "Checking for nested structure:"
-            ls -la android_kernel_google_gs101 || echo "No android_kernel_google_gs101/ directory found"
-            exit 1
-          fi
-          echo "Kernel source files verified in working directory"
-          echo "KERNEL_SRC_DIR=." >> $GITHUB_ENV
-
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
         with:
@@ -84,82 +61,44 @@ jobs:
           remove-haskell: "true"
           remove-codeql: "true"
 
-      - name: Validate inputs
+      - name: Installing dependencies
         run: |
-          if [ "${{ inputs.kernelsu_variant }}" != "Next" ]; then
-            echo "Error: kernelsu_variant must be 'Next'" >&2
-            exit 1
-          fi
-          VALID_BRANCHES=("Stable" "Dev" "Other")
-          if [[ ! " ${VALID_BRANCHES[@]} " =~ " ${{ inputs.kernelsu_branch }} " ]]; then
-            echo "Error: kernelsu_branch must be 'Stable', 'Dev', or 'Other'" >&2
-            exit 1
-          fi
-          if [ "${{ inputs.kernelsu_branch }}" == "Other" ] && [ -z "${{ inputs.kernelsu_branch_other }}" ]; then
-            echo "Error: Custom branch not provided for 'Other'" >&2
-            exit 1
-          fi
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu zip
 
-      - name: Install dependencies
+      - name: Set CONFIG Environment Variable
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            gcc-aarch64-linux-gnu \
-            git-core \
-            gnupg \
-            flex \
-            bison \
-            build-essential \
-            zip \
-            curl \
-            zlib1g-dev \
-            libc6-dev-i386 \
-            libncurses-dev \
-            libncurses5-dev \
-            x11proto-core-dev \
-            libx11-dev \
-            lib32z1-dev \
-            libgl1-mesa-dev \
-            libxml2-utils \
-            xsltproc \
-            unzip \
-            fontconfig \
-            bc \
-            ccache \
-            rsync
+          CONFIG="android_kernel_google_gs101"
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "KERNEL_SRC_DIR=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG set to: $CONFIG"
 
-      - name: Set up ccache
+      - name: Clone AnyKernel3 and Other Dependencies
         run: |
-          sudo apt update && sudo apt install -y ccache
-          mkdir -p ~/.ccache
-          ccache --version
-          ccache --max-size=2G
-          ccache --set-config=compression=true
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-
-      - name: Restore ccache from cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-
-
-      - name: Clone external repositories
-        run: |
-          mkdir -p external_repos
-          cd external_repos
+          echo "Cloning AnyKernel3 and other dependencies..."
           ANYKERNEL_BRANCH="riri"
           SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
           git clone https://github.com/${{ env.REPO_OWNER }}/AnyKernel3.git -b "$ANYKERNEL_BRANCH" --depth=1
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" --depth=1
           git clone https://github.com/${{ env.REPO_OWNER }}/kernel_patches.git --depth=1
-          echo "External repos directory contents:"
+          git clone https://github.com/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}.git -b android-gs-bluraviole-5.10-android14-qpr2-monolithic "$CONFIG"
+
+      - name: Verify checkout
+        run: |
+          echo "Listing working directory contents:"
           ls -la
+          if [ ! -d "$CONFIG/arch" ] || [ ! -f "$CONFIG/Makefile" ] || [ ! -f "$CONFIG/arch/arm64/configs/gs101_defconfig" ] || [ ! -d "$CONFIG/drivers" ]; then
+            echo "Error: Kernel source files not found in $CONFIG. Expected Makefile, arch/arm64/configs/gs101_defconfig, and drivers/." >&2
+            exit 1
+          fi
+          echo "Kernel source files verified in $CONFIG"
 
       - name: Add KernelSU
         run: |
-          cd "$KERNEL_SRC_DIR"
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
           echo "Running KernelSU setup in $(pwd)"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next || {
             echo "Error: KernelSU setup failed. Dumping directory contents for debugging:"
@@ -167,64 +106,71 @@ jobs:
             exit 1
           }
           cd KernelSU-Next
-          if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
-            echo "Using latest KernelSU commit"
-            git checkout $(git rev-parse origin/next)
-          else
-            echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
-            git checkout ${{ inputs.kernelsu_commit_hash }}
-          fi
+          echo "Using specified KernelSU commit: 3fd61e0ee5ee5e6fe941a892924ac26aa752b618"
+          git checkout 3fd61e0ee5ee5e6fe941a892924ac26aa752b618
           cd ..
           echo "Post-KernelSU setup directory contents:"
           ls -la
 
+      - name: Extract KernelSU and SUSFS versions
+        id: extract_versions
+        run: |
+          echo "Extracting version information..."
+          cd "$CONFIG"
+          KSU_VERSION=$(grep -oP 'KERNELSU_VERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]') || echo "1.0.9"
+          KSU_SUBVERSION=$(grep -oP 'KERNELSU_SUBVERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]') || echo "12797"
+          SUSFS_VERSION=$(grep -oP 'SUSFS_VERSION := \K.*' fs/susfs/version.mk | tr -d '[:space:]') || echo "${{ inputs.susfs_version }}"
+          echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_OUTPUT
+          echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_OUTPUT
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_OUTPUT
+          echo "Versions extracted:"
+          echo "KernelSU: $KSU_VERSION-$KSU_SUBVERSION"
+          echo "SUSFS: $SUSFS_VERSION"
+
       - name: Apply SUSFS Patches
         run: |
-          cd "$KERNEL_SRC_DIR"
-          cp ../external_repos/susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
-          cp -r ../external_repos/susfs4ksu/kernel_patches/fs/* ./fs/
-          cp -r ../external_repos/susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cd "$CONFIG"
+          echo "Applying SUSFS patches..."
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
           cd KernelSU-Next
-          cp ../../external_repos/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
           patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
-          cp ../../external_rek_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_rules.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_sucompat.c.patch ./
-          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
-          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_kernel_compat.c.patch ./
-          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
           cd ..
 
       - name: Apply KSU Hooks
         run: |
-          cd "$KERNEL_SRC_DIR"
-          cp ../external_repos/kernel_patches/next/next_hooks.patch ./
+          cd "$CONFIG"
+          cp ../kernel_patches/next/next_hooks.patch ./
           patch -p1 --fuzz=3 < next_hooks.patch
 
       - name: Apply Hide Stuff Patches
         run: |
-          cd "$KERNEL_SRC_DIR"
-          cp ../external_repos/kernel_patches/69_hide_stuff.patch ./
+          cd "$CONFIG"
+          cp ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
 
       - name: Apply KernelSU & SUSFS SUltan Fixes
         run: |
-          cd "$KERNEL_SRC_DIR"
+          cd "$CONFIG"
           sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
           sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
 
       - name: Add SUSFS Configuration Settings
         run: |
-          cd "$KERNEL_SRC_DIR"
+          cd "$CONFIG"
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
@@ -244,17 +190,29 @@ jobs:
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gs101_defconfig
 
-      - name: Setup toolchain
+      - name: Download and Extract Toolchain
         run: |
           TOOLCHAIN_TAR="x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz"
+          TOOLCHAIN_DIR="gcc-14.2.0-nolibc/aarch64-linux"
           wget https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/$TOOLCHAIN_TAR
           tar -xzf $TOOLCHAIN_TAR
-          echo "TOOLCHAIN_PATH=$PWD/gcc-14.2.0-nolibc/aarch64-linux" >> $GITHUB_ENV
-          echo "PATH=$PWD/gcc-14.2.0-nolibc/aarch64-linux/bin:$PATH" >> $GITHUB_ENV
+          TOOLCHAIN_PATH="$PWD/$TOOLCHAIN_DIR"
+          if [ ! -d "$TOOLCHAIN_PATH" ]; then
+            echo "Error: Toolchain directory not found!"
+            exit 1
+          fi
+          echo "TOOLCHAIN_PATH=$TOOLCHAIN_PATH" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN_PATH/bin/aarch64-linux-gcc" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$TOOLCHAIN_PATH/bin/aarch64-linux-" >> $GITHUB_ENV
+          echo "PATH=$TOOLCHAIN_PATH/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Verify Toolchain
+        run: |
+          $CC --version
 
       - name: Build kernel
         run: |
-          cd "$KERNEL_SRC_DIR"
+          cd "$CONFIG"
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-
@@ -266,7 +224,7 @@ jobs:
         if: failure()
         run: |
           echo "::group::Checking for .rej files..."
-          REJ_FILES=$(find "$KERNEL_SRC_DIR" -name '*.rej')
+          REJ_FILES=$(find "$CONFIG" -name '*.rej')
           if [ -z "$REJ_FILES" ]; then
             echo "No .rej files found."
           else
@@ -284,35 +242,37 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patch-rejects
-          path: "${{ env.KERNEL_SRC_DIR }}/**/*.rej"
+          path: "${{ env.CONFIG }}/**/*.rej"
           if-no-files-found: warn
 
       - name: Debug Build Output
         if: ${{ always() }}
         run: |
-          echo "Listing kernel source directory ($KERNEL_SRC_DIR):"
-          ls -R "$KERNEL_SRC_DIR"
-          echo "Listing external_repos directory:"
-          ls -R external_repos/
-          if [ -d "$KERNEL_SRC_DIR/out" ]; then
+          echo "Listing kernel source directory ($CONFIG):"
+          ls -R "$CONFIG"
+          echo "Listing external repos directories:"
+          ls -R AnyKernel3 susfs4ksu kernel_patches
+          if [ -d "$CONFIG/out" ]; then
             echo "Listing out directory:"
-            ls -R "$KERNEL_SRC_DIR/out"
+            ls -R "$CONFIG/out"
           else
-            echo "No out/ directory found in $KERNEL_SRC_DIR"
+            echo "No out/ directory found in $CONFIG"
           fi
 
-      - name: Package artifacts
+      - name: Copy Images
         run: |
-          mkdir -p artifacts
-          cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" artifacts/Image.lz4
-          cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" artifacts/dtbo.img
-          cd external_repos/AnyKernel3
-          cp "../../$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" ./Image.lz4
-          cp "../../$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" ./dtbo.img
-          zip -r ../../artifacts/gs101.zip ./*
+          cd "$CONFIG"
+          echo "Copying Image.lz4 and dtbo.img..."
+          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
+
+      - name: Create AnyKernel3 zip
+        run: |
+          cd AnyKernel3
+          zip -r ../gs101.zip *
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-gs101-${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}
-          path: artifacts/
+          path: gs101.zip
