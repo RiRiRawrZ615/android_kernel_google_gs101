@@ -48,7 +48,7 @@ env:
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
-    if: ${{ !inputs.test_release }}  # ONLY run if test_release is FALSE
+    if: ${{ inputs.make_release && !inputs.test_release }}  # Only run for actual releases
     outputs:
       KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION }}
       KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION }}
@@ -219,7 +219,7 @@ jobs:
   trigger-release:
     runs-on: ubuntu-latest
     needs: build-kernel
-    if: ${{ inputs.make_release }}  # Only depends on make_release
+    if: ${{ inputs.make_release }}  # Always run when make_release is true
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
