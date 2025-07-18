@@ -249,14 +249,14 @@ jobs:
       - name: Setup version info
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12798_SUSFS_1.5.9.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Current DEV Release (TEST)" >> $GITHUB_ENV
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12798_SUSFS_1.5.9-TEST.zip" >> $GITHUB_ENV
+            echo "RELEASE_NAME=🔹 TEST RELEASE 🔹 BluRaviole v1.5.9" >> $GITHUB_ENV
             echo "KSU_VERSION=1.0.9" >> $GITHUB_ENV
             echo "KSU_SUBVERSION=12798" >> $GITHUB_ENV
             echo "SUSFS_VERSION=1.5.9" >> $GITHUB_ENV
           else
             echo "ZIP_NAME=BluRaviole_KSU_NEXT_${{ needs.build-kernel.outputs.KSU_SUBVERSION }}_SUSFS_${{ needs.build-kernel.outputs.SUSFS_VERSION }}.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=Current DEV Release" >> $GITHUB_ENV
+            echo "RELEASE_NAME=BluRaviole v${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
             echo "KSU_VERSION=${{ needs.build-kernel.outputs.KSU_VERSION }}" >> $GITHUB_ENV
             echo "KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}" >> $GITHUB_ENV
             echo "SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
@@ -265,20 +265,43 @@ jobs:
       - name: Construct release notes
         run: |
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "Current DEV Release"
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            echo "## 🔹 TEST RELEASE - FOR LAYOUT VERIFICATION ONLY 🔹"
+            echo "This is a **TEST** release to verify the release workflow formatting and layout."
+            echo ""
+            echo "⚠️ **THIS IS NOT A REAL KERNEL RELEASE** ⚠️"
+            echo "The build process was skipped for this test."
+            echo ""
+          fi
+          echo "### Kernel Information"
+          echo "- **Kernel Version**: ${{ env.KERNEL_VERSION }}"
+          echo "- **Base Version**: ${{ env.BASE_VERSION }}"
+          echo "- **Stock Patch**: \`${{ env.STOCK_PATCH }}\`"
           echo ""
-          echo "This contains KSU Next version ${{ env.KSU_VERSION }} ${{ env.KSU_SUBVERSION }} next susfs dev branch by RifsXD which can be found [here.](https://github.com/rifsxd/KernelSU-Next)"
+          echo "### KernelSU Details"
+          echo "- **Version**: ${{ env.KSU_VERSION }}"
+          echo "- **Subversion**: ${{ env.KSU_SUBVERSION }}"
+          echo "- **Variant**: ${{ inputs.kernelsu_variant }}"
+          echo "- **Branch**: ${{ inputs.kernelsu_branch }}"
+          if [ -n "${{ inputs.kernelsu_branch_other }}" ]; then
+            echo "- **Custom Branch**: ${{ inputs.kernelsu_branch_other }}"
+          fi
+          if [ -n "${{ inputs.kernelsu_commit_hash }}" ]; then
+            echo "- **Commit Hash**: ${{ inputs.kernelsu_commit_hash }}"
+          fi
           echo ""
-          echo "It uses SuSFS ${{ env.SUSFS_VERSION }} made by Simon Punk which can be found [here.](https://gitlab.com/simonpunk/susfs4ksu/-/releases)"
+          echo "### SUSFS Details"
+          echo "- **Version**: ${{ env.SUSFS_VERSION }}"
           echo ""
-          echo "And you can use the webui module by sidex that can be found [here.](https://github.com/sidex15/susfs4ksu-module)"
-          echo ""
-          echo "Kernel Version is ${{ env.KERNEL_VERSION }} currently."
-          echo ""
-          echo "This kernel is ONLY MEAN FOR STOCK ROM WITH PATCH DATE OF \`\`\`${{ env.STOCK_PATCH }}\`\`\` currently."
+          echo "### Compatibility Notice"
+          echo "This kernel is ONLY FOR STOCK ROM WITH PATCH DATE OF \`${{ env.STOCK_PATCH }}\`"
           if [ "${{ inputs.test_release }}" == "true" ]; then
             echo ""
-            echo "**THIS IS A TEST RELEASE - NOT FOR PRODUCTION USE**"
+            echo "---"
+            echo "**TEST RELEASE MARKERS:**"
+            echo "- 🔹 Diamond symbols indicate test release"
+            echo "- '-TEST' suffix in filename"
+            echo "- This warning section"
           fi
           echo "EOF" >> $GITHUB_ENV
 
@@ -315,7 +338,7 @@ jobs:
         if: ${{ inputs.test_release }}
         run: |
           mkdir -p ./release-artifacts
-          echo "Test content" > "./release-artifacts/${{ env.ZIP_NAME }}"
+          echo "This is a test release artifact for layout verification." > "./release-artifacts/${{ env.ZIP_NAME }}"
 
       - name: Rename artifact
         run: |
