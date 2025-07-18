@@ -1,4 +1,4 @@
-name: Build and Release BluRaviole Kernel
+name: Build and Release BluRaviole Kernel2
 
 permissions:
   contents: write
@@ -362,7 +362,7 @@ jobs:
 
       - name: Create release
         id: create_release
-        uses: softprops/action-gh-release@v2 # Upgraded to v2
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -380,6 +380,14 @@ jobs:
             echo "::error::Upload URL is empty or invalid"
             exit 1
           fi
+
+      - name: Construct upload URL manually
+        id: construct_upload_url
+        run: |
+          RELEASE_ID=$(jq -r '.id' <<< "${{ steps.create_release.outputs.api_url }}" | grep -o '[0-9]\+' || echo "233366998")
+          UPLOAD_URL="https://uploads.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/${RELEASE_ID}/assets?name=${{ env.ZIP_NAME }}"
+          echo "Constructed Upload URL: $UPLOAD_URL"
+          echo "UPLOAD_URL=$UPLOAD_URL" >> $GITHUB_OUTPUT
 
       - name: Prepare release asset
         if: ${{ !inputs.test_release }}
@@ -405,7 +413,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          upload_url: ${{ steps.construct_upload_url.outputs.UPLOAD_URL }}
           asset_path: ./release-artifacts/${{ env.ZIP_NAME }}
           asset_name: ${{ env.ZIP_NAME }}
           asset_content_type: application/zip
