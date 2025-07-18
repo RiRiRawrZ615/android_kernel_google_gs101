@@ -1,4 +1,4 @@
-name: Build and Release BluRaviole Kernel2
+name: Build and Release BluRaviole Kernel
 
 permissions:
   contents: write
@@ -373,19 +373,19 @@ jobs:
           draft: false
           fail_on_unmatched_files: false
 
-      - name: Debug upload URL
+      - name: Get release ID
+        id: get_release_id
         run: |
-          echo "Upload URL: ${{ steps.create_release.outputs.upload_url }}"
-          if [ -z "${{ steps.create_release.outputs.upload_url }}" ]; then
-            echo "::error::Upload URL is empty or invalid"
-            exit 1
-          fi
+          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/tags/${{ env.NEW_TAG }}" | \
+            jq -r '.id')
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
+          echo "Fetched Release ID: $RELEASE_ID"
 
-      - name: Construct upload URL manually
+      - name: Construct upload URL
         id: construct_upload_url
         run: |
-          RELEASE_ID=$(jq -r '.id' <<< "${{ steps.create_release.outputs.api_url }}" | grep -o '[0-9]\+' || echo "233366998")
-          UPLOAD_URL="https://uploads.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/${RELEASE_ID}/assets?name=${{ env.ZIP_NAME }}"
+          UPLOAD_URL="https://uploads.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/${{ steps.get_release_id.outputs.RELEASE_ID }}/assets?name=${{ env.ZIP_NAME }}"
           echo "Constructed Upload URL: $UPLOAD_URL"
           echo "UPLOAD_URL=$UPLOAD_URL" >> $GITHUB_OUTPUT
 
