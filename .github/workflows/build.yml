@@ -349,27 +349,53 @@ jobs:
           else
             BASE_TAG="v${{ env.SUSFS_VERSION }}"
           fi
-          TAG_COUNTER=1
-          while true; do
-            PROPOSED_TAG="${BASE_TAG}-r${TAG_COUNTER}"
-            if ! git ls-remote --tags origin "refs/tags/${PROPOSED_TAG}" | grep -q "${PROPOSED_TAG}"; then
-              echo "Using tag: ${PROPOSED_TAG}"
-              echo "NEW_TAG=${PROPOSED_TAG}" >> $GITHUB_ENV
-              break
+          
+          # Get the latest tag
+          LATEST_TAG=$(git ls-remote --tags origin | awk -F'/' '{print $3}' | grep "^$BASE_TAG" | sort -V | tail -n1)
+          
+          if [ -z "$LATEST_TAG" ]; then
+            NEW_TAG="${BASE_TAG}-r1"
+          else
+            # Extract the counter and increment it
+            COUNTER=$(echo "$LATEST_TAG" | awk -F'-r' '{print $2}')
+            if [ -z "$COUNTER" ]; then
+              NEW_TAG="${BASE_TAG}-r1"
+            else
+              NEW_COUNTER=$((COUNTER + 1))
+              NEW_TAG="${BASE_TAG}-r${NEW_COUNTER}"
             fi
-            echo "Tag ${PROPOSED_TAG} exists, trying next..."
-            TAG_COUNTER=$((TAG_COUNTER + 1))
-          done
+          fi
+          
+          echo "Using tag: $NEW_TAG"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
 
       - name: Create Git tag
         run: |
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          git tag ${{ env.NEW_TAG }} || echo "Tag already exists (this is okay)"
-          git push origin ${{ env.NEW_TAG }} || echo "Tag push failed (may already exist)"
+          git tag ${{ env.NEW_TAG }}
+          git push origin ${{ env.NEW_TAG }}
+
+      - name: Download artifact
+        if: ${{ !inputs.test_release }}
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-gs101
+          path: ./release-artifacts
+
+      - name: Create test artifact
+        if: ${{ inputs.test_release }}
+        run: |
+          mkdir -p ./release-artifacts
+          echo "Test release artifact - not for actual use" > test-readme.txt
+          zip -j "./release-artifacts/${{ env.ZIP_NAME }}" test-readme.txt
+
+      - name: Rename artifact
+        if: ${{ !inputs.test_release }}
+        run: |
+          mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
 
       - name: Create release
-        id: create_release
         uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -379,58 +405,5 @@ jobs:
           body: ${{ env.RELEASE_NOTES }}
           prerelease: true
           draft: false
-          fail_on_unmatched_files: false
-
-      - name: Get release ID
-        id: get_release_id
-        run: |
-          RELEASE_ID=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/tags/${{ env.NEW_TAG }}" | \
-            jq -r '.id')
-          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_OUTPUT
-          echo "Fetched Release ID: $RELEASE_ID"
-
-      - name: Construct upload URL
-        id: construct_upload_url
-        run: |
-          UPLOAD_URL="https://uploads.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/${{ steps.get_release_id.outputs.RELEASE_ID }}/assets?name=${{ env.ZIP_NAME }}"
-          echo "Constructed Upload URL: $UPLOAD_URL"
-          echo "UPLOAD_URL=$UPLOAD_URL" >> $GITHUB_OUTPUT
-
-      - name: Prepare release asset
-        if: ${{ !inputs.test_release }}
-        uses: actions/download-artifact@v4
-        with:
-          name: kernel-gs101
-          path: ./release-artifacts
-
-      - name: Create test asset
-        if: ${{ inputs.test_release }}
-        run: |
-          mkdir -p ./release-artifacts
-          # Create a valid ZIP file for test releases
-          echo "Test release artifact - not for actual use" > test-readme.txt
-          zip -j "./release-artifacts/${{ env.ZIP_NAME }}" test-readme.txt
-
-      - name: Verify test asset
-        if: ${{ inputs.test_release }}
-        run: |
-          if ! unzip -t "./release-artifacts/${{ env.ZIP_NAME }}"; then
-            echo "::error::Test artifact is not a valid ZIP file"
-            exit 1
-          fi
-
-      - name: Rename artifact
-        if: ${{ !inputs.test_release }}
-        run: |
-          mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.construct_upload_url.outputs.UPLOAD_URL }}
-          asset_path: ./release-artifacts/${{ env.ZIP_NAME }}
-          asset_name: ${{ env.ZIP_NAME }}
-          asset_content_type: application/zip
+          files: |
+            ./release-artifacts/${{ env.ZIP_NAME }}
