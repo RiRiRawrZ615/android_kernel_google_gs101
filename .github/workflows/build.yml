@@ -197,6 +197,14 @@ jobs:
           patch -p1 --forward --fuzz=3 < fix_rules.c.patch
           cd ..
 
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+          cd ..
+
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/afix_kernel_compat.c.patch./
+          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+          cd ..          
+
       - name: Apply KSU Hooks
         if: ${{ steps.check_test_release.outputs.skip_build == 'false' }}
         run: |
