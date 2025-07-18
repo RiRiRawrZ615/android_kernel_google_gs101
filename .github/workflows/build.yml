@@ -305,9 +305,9 @@ jobs:
           fi
           echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            echo "RELEASE_NAME=BluRaviole v${SUSFS_VERSION} TEST" >> $GITHUB_ENV
+            echo "RELEASE_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION} TEST" >> $GITHUB_ENV
           else
-            echo "RELEASE_NAME=BluRaviole v${SUSFS_VERSION}" >> $GITHUB_ENV
+            echo "RELEASE_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}" >> $GITHUB_ENV
           fi
           echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
           echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_ENV
@@ -316,20 +316,20 @@ jobs:
       - name: Construct release notes
         run: |
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "Current DEV Release"
-          echo ""
-          echo "This contains KSU Next version ${{ env.KSU_VERSION }} ${{ env.KSU_SUBVERSION }} next susfs dev branch by RifsXD which can be found [here](https://github.com/rifsxd/KernelSU-Next)."
-          echo ""
-          echo "It uses SuSFS ${{ env.SUSFS_VERSION }} made by Simon Punk which can be found [here](https://gitlab.com/simonpunk/susfs4ksu/-/releases)."
-          echo ""
-          echo "And you can use the webui module by sidex that can be found [here](https://github.com/sidex15/susfs4ksu-module)."
-          echo ""
-          echo "Kernel Version is ${{ env.KERNEL_VERSION }} currently."
-          echo ""
-          echo "This kernel is ONLY MEAN FOR STOCK ROM WITH PATCH DATE OF \`${{ env.STOCK_PATCH }}\` currently."
+          echo "Current DEV Release" >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "This contains KSU Next version ${{ env.KSU_VERSION }} ${{ env.KSU_SUBVERSION }} next susfs dev branch by RifsXD which can be found [here](https://github.com/rifsxd/KernelSU-Next)." >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "It uses SuSFS ${{ env.SUSFS_VERSION }} made by Simon Punk which can be found [here](https://gitlab.com/simonpunk/susfs4ksu/-/releases)." >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "And you can use the webui module by sidex that can be found [here](https://github.com/sidex15/susfs4ksu-module)." >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "Kernel Version is ${{ env.KERNEL_VERSION }} currently." >> $GITHUB_ENV
+          echo "" >> $GITHUB_ENV
+          echo "This kernel is ONLY MEAN FOR STOCK ROM WITH PATCH DATE OF \`${{ env.STOCK_PATCH }}\` currently." >> $GITHUB_ENV
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            echo ""
-            echo "**NOTE: THIS IS A TEST RELEASE**"
+            echo "" >> $GITHUB_ENV
+            echo "**NOTE: THIS IS A TEST RELEASE**" >> $GITHUB_ENV
           fi
           echo "EOF" >> $GITHUB_ENV
 
