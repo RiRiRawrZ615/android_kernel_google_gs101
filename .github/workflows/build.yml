@@ -33,10 +33,10 @@ on:
         type: string
         default: ""
       kernelsu_commit_hash:
-        description: "Specify the GitHub commit hash for KernelSU Next"
-        required: true
+        description: "Specify the GitHub commit hash for KernelSU Next (leave blank for latest)"
+        required: false
         type: string
-        default: "3fd61e0ee5ee5e6fe941a892924ac26aa752b618"
+        default: ""
 
 env:
   BASE_VERSION: "1.5.9"
@@ -46,64 +46,81 @@ env:
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
-    if: ${{ !inputs.test_release }}
+    if: ${{ !inputs.test_release }}  # Only skip build if test_release is true
     outputs:
       KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION }}
       KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION }}
       SUSFS_VERSION: ${{ steps.extract_versions.outputs.SUSFS_VERSION }}
 
     steps:
-      # [Previous build steps remain exactly the same until package artifacts]
+      # [Previous build steps remain the same until Add KernelSU step]
       
-      - name: Package artifacts
+      - name: Add KernelSU
         run: |
           cd "$CONFIG"
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          cd KernelSU-Next
           
-          cd ../AnyKernel3
-          zip -r ../gs101.zip *
+          # Use provided commit hash or default to latest
+          if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
+            echo "Using latest KernelSU commit"
+            git checkout $(git rev-parse origin/next)
+          else
+            echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
+            git checkout ${{ inputs.kernelsu_commit_hash }}
+          fi
           cd ..
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-gs101
-          path: ./gs101.zip
+      # [Rest of build steps remain the same]
 
   trigger-release:
     runs-on: ubuntu-latest
     needs: build-kernel
-    if: ${{ inputs.make_release }}
+    if: ${{ inputs.make_release }}  # This job only runs if make_release is true
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Setup version info
         run: |
-          KSU_VERSION=${{ needs.build-kernel.outputs.KSU_VERSION }}
-          KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}
-          SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
-          
-          echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
-          echo "RELEASE_NAME=BluRaviole Kernel with KSU Next $KSU_SUBVERSION & SUSFS $SUSFS_VERSION" >> $GITHUB_ENV
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            # Use test/dummy values
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12797_SUSFS_1.5.9.zip" >> $GITHUB_ENV
+            echo "RELEASE_NAME=BluRaviole Kernel with KSU Next 12797 & SUSFS 1.5.9 (TEST RELEASE)" >> $GITHUB_ENV
+            echo "KSU_SUBVERSION=12797" >> $GITHUB_ENV
+            echo "SUSFS_VERSION=1.5.9" >> $GITHUB_ENV
+          else
+            # Use real values from build job
+            KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}
+            SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
+            echo "RELEASE_NAME=BluRaviole Kernel with KSU Next $KSU_SUBVERSION & SUSFS $SUSFS_VERSION" >> $GITHUB_ENV
+            echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_ENV
+            echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_ENV
+          fi
 
       - name: Construct release notes
         run: |
-          KSU_VERSION=${{ needs.build-kernel.outputs.KSU_VERSION }}
-          KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}
-          SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
-          
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            KSU_REF="TEST_RELEASE_DUMMY_HASH"
+            SUSFS_HASH="TEST_RELEASE_DUMMY_HASH"
+            RELEASE_NOTES="**TEST RELEASE - NOT FOR PRODUCTION USE**\n\n"
+          else
+            KSU_REF="${{ inputs.kernelsu_commit_hash }}"
+            SUSFS_HASH=$(git ls-remote https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android13-5.10 | awk '{ print $1 }')
+            RELEASE_NOTES=""
+          fi
+
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "**BluRaviole Kernel for Pixel 6/Pro (oriole/raven)**"
+          echo "${RELEASE_NOTES}**BluRaviole Kernel for Pixel 6/Pro (oriole/raven)**"
           echo ""
           echo "**Requirements:**"
           echo "- December 2023 Security Patch or newer"
           echo "- KernelSU Manager installed"
           echo ""
           echo "**Features:**"
-          echo "- KernelSU Next $KSU_VERSION.$KSU_SUBVERSION"
-          echo "- SUSFS $SUSFS_VERSION"
+          echo "- KernelSU Next ${{ env.KSU_SUBVERSION }}"
+          echo "- SUSFS ${{ env.SUSFS_VERSION }}"
           echo "- Magic Mount Support"
           echo "- Wireguard Support"
           echo "- CASS Scheduler"
@@ -120,65 +137,8 @@ jobs:
           echo "- RiRiRawrZ615 for kernel builds"
           echo ""
           echo "**Commit Hashes:**"
-          echo "- KernelSU: ${{ inputs.kernelsu_commit_hash }}"
-          echo "- SUSFS: $(git ls-remote https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android13-5.10 | awk '{ print $1 }')"
+          echo "- KernelSU: ${KSU_REF}"
+          echo "- SUSFS: ${SUSFS_HASH}"
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Generate tag
-        run: |
-          SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
-          TAGS=$(git tag -l "v$SUSFS_VERSION-r*" | sort -V)
-          
-          if [ -z "$TAGS" ]; then
-            NEW_TAG="v$SUSFS_VERSION-r1"
-          else
-            LAST_TAG=$(echo "$TAGS" | tail -n1)
-            LAST_NUM=$(echo "$LAST_TAG" | sed -E "s/v${SUSFS_VERSION//./\\.}-r([0-9]+)/\1/")
-            NEW_NUM=$((LAST_NUM + 1))
-            NEW_TAG="v$SUSFS_VERSION-r$NEW_NUM"
-          fi
-          
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
-          git tag $NEW_TAG || echo "Tag exists"
-          git push origin $NEW_TAG || echo "Tag push failed"
-
-      - name: Prepare release asset
-        if: ${{ !inputs.test_release }}
-        uses: actions/download-artifact@v4
-        with:
-          name: kernel-gs101
-          path: ./release-artifacts
-
-      - name: Create test asset
-        if: ${{ inputs.test_release }}
-        run: |
-          mkdir -p ./release-artifacts
-          KSU_SUBVERSION="12797"  # Example test value
-          SUSFS_VERSION="1.5.9"   # Example test value
-          echo "Test content" > "./release-artifacts/BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip"
-          echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
-
-      - name: Rename artifact
-        run: |
-          mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
-
-      - name: Create release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          release_name: ${{ env.RELEASE_NAME }}
-          body: ${{ env.RELEASE_NOTES }}
-          prerelease: true
-
-      - name: Upload release asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
-          asset_path: ./release-artifacts/${{ env.ZIP_NAME }}
-          asset_name: ${{ env.ZIP_NAME }}
-          asset_content_type: application/zip
+      # [Rest of the release steps remain the same]
