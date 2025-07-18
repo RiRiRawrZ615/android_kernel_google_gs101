@@ -275,11 +275,11 @@ jobs:
       - name: Setup version info
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12798_SUSFS_1.0.9.zip" >> $GITHUB_ENV
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12797_SUSFS_1.5.9.zip" >> $GITHUB_ENV
             echo "RELEASE_NAME=BluRaviole v1.5.9 TEST" >> $GITHUB_ENV
             echo "KSU_VERSION=1.0.9" >> $GITHUB_ENV
-            echo "KSU_SUBVERSION=12798" >> $GITHUB_ENV
-            echo "SUSFS_VERSION=1.0.9" >> $GITHUB_ENV
+            echo "KSU_SUBVERSION=12797" >> $GITHUB_ENV
+            echo "SUSFS_VERSION=1.5.9" >> $GITHUB_ENV
           else
             echo "ZIP_NAME=BluRaviole_KSU_NEXT_${{ needs.build-kernel.outputs.KSU_SUBVERSION }}_SUSFS_${{ needs.build-kernel.outputs.SUSFS_VERSION }}.zip" >> $GITHUB_ENV
             echo "RELEASE_NAME=BluRaviole v${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
@@ -291,28 +291,17 @@ jobs:
       - name: Construct release notes
         run: |
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "### Kernel Information"
-          echo "- **Kernel Version**: ${{ env.KERNEL_VERSION }}"
-          echo "- **Base Version**: ${{ env.BASE_VERSION }}"
-          echo "- **Stock Patch**: \`${{ env.STOCK_PATCH }}\`"
+          echo "Current DEV Release"
           echo ""
-          echo "### KernelSU Details"
-          echo "- **Version**: ${{ env.KSU_VERSION }}"
-          echo "- **Subversion**: ${{ env.KSU_SUBVERSION }}"
-          echo "- **Variant**: ${{ inputs.kernelsu_variant }}"
-          echo "- **Branch**: ${{ inputs.kernelsu_branch }}"
-          if [ -n "${{ inputs.kernelsu_branch_other }}" ]; then
-            echo "- **Custom Branch**: ${{ inputs.kernelsu_branch_other }}"
-          fi
-          if [ -n "${{ inputs.kernelsu_commit_hash }}" ]; then
-            echo "- **Commit Hash**: ${{ inputs.kernelsu_commit_hash }}"
-          fi
+          echo "This contains KSU Next version ${{ env.KSU_VERSION }} ${{ env.KSU_SUBVERSION }} next susfs dev branch by RifsXD which can be found [here](https://github.com/rifsxd/KernelSU-Next)."
           echo ""
-          echo "### SUSFS Details"
-          echo "- **Version**: ${{ env.SUSFS_VERSION }}"
+          echo "It uses SuSFS ${{ env.SUSFS_VERSION }} made by Simon Punk which can be found [here](https://gitlab.com/simonpunk/susfs4ksu/-/releases)."
           echo ""
-          echo "### Compatibility Notice"
-          echo "This kernel is ONLY FOR STOCK ROM WITH PATCH DATE OF \`${{ env.STOCK_PATCH }}\`"
+          echo "And you can use the webui module by sidex that can be found [here](https://github.com/sidex15/susfs4ksu-module)."
+          echo ""
+          echo "Kernel Version is ${{ env.KERNEL_VERSION }} currently."
+          echo ""
+          echo "This kernel is ONLY MEAN FOR STOCK ROM WITH PATCH DATE OF \`${{ env.STOCK_PATCH }}\` currently."
           if [ "${{ inputs.test_release }}" == "true" ]; then
             echo ""
             echo "**NOTE: THIS IS A TEST RELEASE**"
@@ -323,12 +312,11 @@ jobs:
         id: generate_tag
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            BASE_TAG="test-v1.0.9"
+            BASE_TAG="test-v1.5.9"
           else
             BASE_TAG="v${{ needs.build-kernel.outputs.SUSFS_VERSION }}"
           fi
 
-          # Find next available tag
           TAG_COUNTER=1
           while true; do
             PROPOSED_TAG="${BASE_TAG}-r${TAG_COUNTER}"
