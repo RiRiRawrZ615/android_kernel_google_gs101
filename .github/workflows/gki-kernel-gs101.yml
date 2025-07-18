@@ -60,12 +60,28 @@ jobs:
           fetch-depth: 1
           submodules: false
 
-      - name: Verify repository structure
+      - name: Detect kernel source directory
         run: |
-          echo "Listing working directory contents:"
+          echo "Listing repository contents:"
           ls -la
-          if [ ! -d "arch" ] || [ ! -f "Makefile" ]; then
-            echo "Error: Kernel source directory structure not found. Expected kernel source files in repository root." >&2
+          if [ -f "Makefile" ] && [ -d "arch/arm64/configs" ] && [ -f "arch/arm64/configs/gs101_defconfig" ]; then
+            echo "Kernel source found in repository root"
+            echo "KERNEL_SRC_DIR=." >> $GITHUB_ENV
+          else
+            KERNEL_SRC_DIR=$(find . -maxdepth 3 -type f -name "gs101_defconfig" -exec dirname {} \; | head -n 1)
+            if [ -z "$KERNEL_SRC_DIR" ]; then
+              echo "Error: Could not find kernel source directory with gs101_defconfig" >&2
+              exit 1
+            fi
+            KERNEL_SRC_DIR=$(dirname "$KERNEL_SRC_DIR")
+            echo "Kernel source found in $KERNEL_SRC_DIR"
+            echo "KERNEL_SRC_DIR=$KERNEL_SRC_DIR" >> $GITHUB_ENV
+          fi
+          cd "$KERNEL_SRC_DIR"
+          echo "Current directory: $(pwd)"
+          ls -la
+          if [ ! -d "drivers" ]; then
+            echo "Error: 'drivers/' directory not found in $KERNEL_SRC_DIR" >&2
             exit 1
           fi
 
@@ -151,7 +167,12 @@ jobs:
 
       - name: Add KernelSU
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          cd "$KERNEL_SRC_DIR"
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next || {
+            echo "Error: KernelSU setup failed. Dumping directory contents for debugging:"
+            ls -la
+            exit 1
+          }
           cd KernelSU-Next
           if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
             echo "Using latest KernelSU commit"
@@ -164,9 +185,10 @@ jobs:
 
       - name: Apply SUSFS Patches
         run: |
-          cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
-          cp -r susfs4ksu/kernel_patches/fs/* ./fs/
-          cp -r susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cd "$KERNEL_SRC_DIR"
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
           cd KernelSU-Next
           cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
@@ -189,21 +211,25 @@ jobs:
 
       - name: Apply KSU Hooks
         run: |
-          cp kernel_patches/next/next_hooks.patch ./
+          cd "$KERNEL_SRC_DIR"
+          cp ../kernel_patches/next/next_hooks.patch ./
           patch -p1 --fuzz=3 < next_hooks.patch
 
       - name: Apply Hide Stuff Patches
         run: |
-          cp kernel_patches/69_hide_stuff.patch ./
+          cd "$KERNEL_SRC_DIR"
+          cp ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
 
       - name: Apply KernelSU & SUSFS SUltan Fixes
         run: |
+          cd "$KERNEL_SRC_DIR"
           sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
           sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
 
       - name: Add SUSFS Configuration Settings
         run: |
+          cd "$KERNEL_SRC_DIR"
           echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
@@ -233,6 +259,7 @@ jobs:
 
       - name: Build kernel
         run: |
+          cd "$KERNEL_SRC_DIR"
           export ARCH=arm64
           export SUBARCH=arm64
           export CROSS_COMPILE=aarch64-linux-
@@ -244,7 +271,7 @@ jobs:
         if: failure()
         run: |
           echo "::group::Checking for .rej files..."
-          REJ_FILES=$(find . -name '*.rej')
+          REJ_FILES=$(find "$KERNEL_SRC_DIR" -name '*.rej')
           if [ -z "$REJ_FILES" ]; then
             echo "No .rej files found."
           else
@@ -262,23 +289,31 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: patch-rejects
-          path: "**/*.rej"
+          path: "${{ env.KERNEL_SRC_DIR }}/**/*.rej"
           if-no-files-found: warn
 
       - name: Debug Build Output
         if: ${{ always() }}
         run: |
-          ls -R out/
+          echo "Listing kernel source directory ($KERNEL_SRC_DIR):"
+          ls -R "$KERNEL_SRC_DIR"
+          echo "Listing AnyKernel3 directory:"
           ls -R AnyKernel3/
+          if [ -d "$KERNEL_SRC_DIR/out" ]; then
+            echo "Listing out directory:"
+            ls -R "$KERNEL_SRC_DIR/out"
+          else
+            echo "No out/ directory found in $KERNEL_SRC_DIR"
+          fi
 
       - name: Package artifacts
         run: |
           mkdir -p artifacts
-          cp out/arch/arm64/boot/Image.lz4 artifacts/Image.lz4
-          cp out/arch/arm64/boot/dts/google/dtbo.img artifacts/dtbo.img
+          cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" artifacts/Image.lz4
+          cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" artifacts/dtbo.img
           cd AnyKernel3
-          cp ../out/arch/arm64/boot/Image.lz4 ./Image.lz4
-          cp ../out/arch/arm64/boot/dts/google/dtbo.img ./dtbo.img
+          cp "../$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" ./Image.lz4
+          cp "../$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" ./dtbo.img
           zip -r ../artifacts/gs101.zip ./*
 
       - name: Upload Build Artifacts
