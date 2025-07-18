@@ -314,27 +314,57 @@ jobs:
           fi
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Generate tag
+      - name: Generate unique tag
+        id: generate_tag
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            NEW_TAG="test-v${{ env.SUSFS_VERSION }}-r1"
+            BASE_TAG="test-v${{ env.SUSFS_VERSION }}"
           else
-            SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
-            TAGS=$(git tag -l "v$SUSFS_VERSION-r*" | sort -V)
-            
-            if [ -z "$TAGS" ]; then
-              NEW_TAG="v$SUSFS_VERSION-r1"
-            else
-              LAST_TAG=$(echo "$TAGS" | tail -n1)
-              LAST_NUM=$(echo "$LAST_TAG" | sed -E "s/v${SUSFS_VERSION//./\\.}-r([0-9]+)/\1/")
-              NEW_NUM=$((LAST_NUM + 1))
-              NEW_TAG="v$SUSFS_VERSION-r$NEW_NUM"
-            fi
+            BASE_TAG="v${{ needs.build-kernel.outputs.SUSFS_VERSION }}"
           fi
+
+          # Find next available tag
+          TAG_COUNTER=1
+          while true; do
+            PROPOSED_TAG="${BASE_TAG}-r${TAG_COUNTER}"
+            if ! git ls-remote --tags origin "refs/tags/${PROPOSED_TAG}" | grep -q "${PROPOSED_TAG}"; then
+              echo "Using tag: ${PROPOSED_TAG}"
+              echo "NEW_TAG=${PROPOSED_TAG}" >> $GITHUB_ENV
+              break
+            fi
+            echo "Tag ${PROPOSED_TAG} exists, trying next..."
+            TAG_COUNTER=$((TAG_COUNTER + 1))
+          done
+
+      - name: Create Git tag
+        run: |
+          git tag ${{ env.NEW_TAG }} || echo "Tag already exists (this is okay)"
+          git push origin ${{ env.NEW_TAG }} || echo "Tag push failed (may already exist)"
+
+      - name: Create release
+        id: create_release
+        continue-on-error: true
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.NEW_TAG }}
+          release_name: ${{ env.RELEASE_NAME }}
+          body: ${{ env.RELEASE_NOTES }}
+          prerelease: true
+
+      - name: Get existing release if needed
+        if: steps.create_release.outcome != 'success'
+        id: get_release
+        run: |
+          RELEASE_ID=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/tags/${{ env.NEW_TAG }}" \
+            | jq -r '.id')
           
-          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
-          git tag $NEW_TAG || echo "Tag exists"
-          git push origin $NEW_TAG || echo "Tag push failed"
+          echo "RELEASE_ID=$RELEASE_ID" >> $GITHUB_ENV
+          echo "UPLOAD_URL=https://uploads.github.com/repos/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}/releases/$RELEASE_ID/assets" >> $GITHUB_ENV
 
       - name: Prepare release asset
         if: ${{ !inputs.test_release }}
@@ -347,7 +377,7 @@ jobs:
         if: ${{ inputs.test_release }}
         run: |
           mkdir -p ./release-artifacts
-          echo "Test release content" > "./release-artifacts/${{ env.ZIP_NAME }}"
+          echo "Test release artifact - not for actual use" > "./release-artifacts/${{ env.ZIP_NAME }}"
 
       - name: Rename artifact
         run: |
@@ -355,23 +385,12 @@ jobs:
             mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
           fi
 
-      - name: Create release
-        id: create-release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ env.NEW_TAG }}
-          release_name: ${{ env.RELEASE_NAME }}
-          body: ${{ env.RELEASE_NOTES }}
-          prerelease: true
-
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.upload_url || env.UPLOAD_URL }}
           asset_path: ./release-artifacts/${{ env.ZIP_NAME }}
           asset_name: ${{ env.ZIP_NAME }}
           asset_content_type: application/zip
