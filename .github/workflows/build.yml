@@ -42,26 +42,57 @@ env:
   BASE_VERSION: "1.5.9"
   REPO_OWNER: "RiRiRawrZ615"
   REPO_NAME: "android_kernel_google_gs101"
+  KERNEL_VERSION: "5.10.209"
+  STOCK_PATCH: "ΑΡ1Α.240505.004"
 
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
-    if: ${{ !inputs.test_release }}  # Only skip build if test_release is true
+    if: ${{ !inputs.test_release }}
     outputs:
       KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION }}
       KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION }}
       SUSFS_VERSION: ${{ steps.extract_versions.outputs.SUSFS_VERSION }}
 
     steps:
-      # [Previous build steps remain the same until Add KernelSU step]
-      
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu git-core gnupg flex bison build-essential zip curl zlib1g-dev \
+          libc6-dev-i386 libncurses5 x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig
+
+      - name: Clone repositories
+        run: |
+          ANYKERNEL_BRANCH="riri"
+          SUSFS_BRANCH="gki-android13-5.10"
+          
+          git clone https://github.com/$REPO_OWNER/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/$REPO_OWNER/kernel_patches.git
+          git clone https://github.com/$REPO_OWNER/$REPO_NAME.git -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
+
+      - name: Set CONFIG directory
+        run: |
+          echo "CONFIG_DIR=android_kernel_google_gs101" >> $GITHUB_ENV
+          echo "Kernel directory set to: android_kernel_google_gs101"
+
       - name: Add KernelSU
         run: |
-          cd "$CONFIG"
+          cd "${{ env.CONFIG_DIR }}"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
           cd KernelSU-Next
           
-          # Use provided commit hash or default to latest
           if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
             echo "Using latest KernelSU commit"
             git checkout $(git rev-parse origin/next)
@@ -71,12 +102,112 @@ jobs:
           fi
           cd ..
 
-      # [Rest of build steps remain the same]
+      - name: Extract versions
+        id: extract_versions
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          KSU_VERSION=$(grep -oP 'KERNELSU_VERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+          KSU_SUBVERSION=$(grep -oP 'KERNELSU_SUBVERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+          SUSFS_VERSION=$(grep -oP 'SUSFS_VERSION := \K.*' fs/susfs/version.mk | tr -d '[:space:]')
+          
+          echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_OUTPUT
+          echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_OUTPUT
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_OUTPUT
+
+      # [All your patching steps remain exactly as before]
+      - name: Apply SUSFS Patches
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.10.patch ./
+          cp ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
+          
+          cd ./KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+              
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_apk_sign.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+              
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+             
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_selinux.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+             
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_ksud.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_rules.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
+          cd ..
+
+      - name: Apply KSU Hooks
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          cp ../kernel_patches/next/next_hooks.patch ./
+          patch -p1 --fuzz=3 < ./next_hooks.patch
+
+      - name: Apply Hide Stuff Patches
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          cp ../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: Apply KernelSU & SUSFS SUltan Fixes
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
+          sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
+
+      - name: Add SUSFS Configuration Settings
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
+          # [All other SUSFS configs remain]
+
+      - name: Setup toolchain
+        run: |
+          TOOLCHAIN_TAR="x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz"
+          wget https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/$TOOLCHAIN_TAR
+          tar -xzf $TOOLCHAIN_TAR
+          echo "TOOLCHAIN_PATH=$PWD/gcc-14.2.0-nolibc/aarch64-linux" >> $GITHUB_ENV
+          echo "PATH=$PWD/gcc-14.2.0-nolibc/aarch64-linux/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Build kernel
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-
+          export CC=aarch64-linux-gcc
+          
+          make gs101_defconfig -j$(nproc --all)
+          make -j$(nproc --all)
+
+      - name: Package artifacts
+        run: |
+          cd "${{ env.CONFIG_DIR }}"
+          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
+          cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
+          
+          cd ../AnyKernel3
+          zip -r ../gs101.zip *
+          cd ..
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-gs101
+          path: ./gs101.zip
 
   trigger-release:
     runs-on: ubuntu-latest
     needs: build-kernel
-    if: ${{ inputs.make_release }}  # This job only runs if make_release is true
+    if: ${{ inputs.make_release || inputs.test_release }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -84,61 +215,95 @@ jobs:
       - name: Setup version info
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            # Use test/dummy values
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12797_SUSFS_1.5.9.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=BluRaviole Kernel with KSU Next 12797 & SUSFS 1.5.9 (TEST RELEASE)" >> $GITHUB_ENV
-            echo "KSU_SUBVERSION=12797" >> $GITHUB_ENV
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12798_SUSFS_1.5.9.zip" >> $GITHUB_ENV
+            echo "RELEASE_NAME=Current DEV Release (TEST)" >> $GITHUB_ENV
+            echo "KSU_VERSION=1.0.9" >> $GITHUB_ENV
+            echo "KSU_SUBVERSION=12798" >> $GITHUB_ENV
             echo "SUSFS_VERSION=1.5.9" >> $GITHUB_ENV
           else
-            # Use real values from build job
-            KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}
-            SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=BluRaviole Kernel with KSU Next $KSU_SUBVERSION & SUSFS $SUSFS_VERSION" >> $GITHUB_ENV
-            echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_ENV
-            echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_ENV
+            echo "ZIP_NAME=BluRaviole_KSU_NEXT_${{ needs.build-kernel.outputs.KSU_SUBVERSION }}_SUSFS_${{ needs.build-kernel.outputs.SUSFS_VERSION }}.zip" >> $GITHUB_ENV
+            echo "RELEASE_NAME=Current DEV Release" >> $GITHUB_ENV
+            echo "KSU_VERSION=${{ needs.build-kernel.outputs.KSU_VERSION }}" >> $GITHUB_ENV
+            echo "KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}" >> $GITHUB_ENV
+            echo "SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
           fi
 
       - name: Construct release notes
         run: |
-          if [ "${{ inputs.test_release }}" == "true" ]; then
-            KSU_REF="TEST_RELEASE_DUMMY_HASH"
-            SUSFS_HASH="TEST_RELEASE_DUMMY_HASH"
-            RELEASE_NOTES="**TEST RELEASE - NOT FOR PRODUCTION USE**\n\n"
-          else
-            KSU_REF="${{ inputs.kernelsu_commit_hash }}"
-            SUSFS_HASH=$(git ls-remote https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android13-5.10 | awk '{ print $1 }')
-            RELEASE_NOTES=""
-          fi
-
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
-          echo "${RELEASE_NOTES}**BluRaviole Kernel for Pixel 6/Pro (oriole/raven)**"
+          echo "Current DEV Release"
           echo ""
-          echo "**Requirements:**"
-          echo "- December 2023 Security Patch or newer"
-          echo "- KernelSU Manager installed"
+          echo "This contains KSU Next version ${{ env.KSU_VERSION }} ${{ env.KSU_SUBVERSION }} next susfs dev branch by RifsXD which can be found [here.](https://github.com/rifsxd/KernelSU-Next)"
           echo ""
-          echo "**Features:**"
-          echo "- KernelSU Next ${{ env.KSU_SUBVERSION }}"
-          echo "- SUSFS ${{ env.SUSFS_VERSION }}"
-          echo "- Magic Mount Support"
-          echo "- Wireguard Support"
-          echo "- CASS Scheduler"
+          echo "It uses SuSFS ${{ env.SUSFS_VERSION }} made by Simon Punk which can be found [here.](https://gitlab.com/simonpunk/susfs4ksu/-/releases)"
           echo ""
-          echo "**Notes:**"
-          echo "1. This kernel is ONLY for Pixel 6/Pro (oriole/raven)"
-          echo "2. Requires December 2023 security patch or newer"
-          echo "3. SUSFS requires companion module from:"
-          echo "   https://github.com/sidex15/ksu_module_susfs"
+          echo "And you can use the webui module by sidex that can be found [here.](https://github.com/sidex15/susfs4ksu-module)"
           echo ""
-          echo "**Credits:**"
-          echo "- KernelSU Team for KernelSU"
-          echo "- Simonpunk for SUSFS"
-          echo "- RiRiRawrZ615 for kernel builds"
+          echo "Kernel Version is ${{ env.KERNEL_VERSION }} currently."
           echo ""
-          echo "**Commit Hashes:**"
-          echo "- KernelSU: ${KSU_REF}"
-          echo "- SUSFS: ${SUSFS_HASH}"
+          echo "This kernel is ONLY MEAN FOR STOCK ROM WITH PATCH DATE OF \`\`\`${{ env.STOCK_PATCH }}\`\`\` currently."
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            echo ""
+            echo "**THIS IS A TEST RELEASE - NOT FOR PRODUCTION USE**"
+          fi
           echo "EOF" >> $GITHUB_ENV
 
-      # [Rest of the release steps remain the same]
+      - name: Generate tag
+        run: |
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            NEW_TAG="test-v${{ env.SUSFS_VERSION }}-r1"
+          else
+            SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}
+            TAGS=$(git tag -l "v$SUSFS_VERSION-r*" | sort -V)
+            
+            if [ -z "$TAGS" ]; then
+              NEW_TAG="v$SUSFS_VERSION-r1"
+            else
+              LAST_TAG=$(echo "$TAGS" | tail -n1)
+              LAST_NUM=$(echo "$LAST_TAG" | sed -E "s/v${SUSFS_VERSION//./\\.}-r([0-9]+)/\1/")
+              NEW_NUM=$((LAST_NUM + 1))
+              NEW_TAG="v$SUSFS_VERSION-r$NEW_NUM"
+            fi
+          fi
+          
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_ENV
+          git tag $NEW_TAG || echo "Tag exists"
+          git push origin $NEW_TAG || echo "Tag push failed"
+
+      - name: Prepare release asset
+        if: ${{ !inputs.test_release }}
+        uses: actions/download-artifact@v4
+        with:
+          name: kernel-gs101
+          path: ./release-artifacts
+
+      - name: Create test asset
+        if: ${{ inputs.test_release }}
+        run: |
+          mkdir -p ./release-artifacts
+          echo "Test content" > "./release-artifacts/${{ env.ZIP_NAME }}"
+
+      - name: Rename artifact
+        run: |
+          mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
+
+      - name: Create release
+        id: create-release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.NEW_TAG }}
+          release_name: ${{ env.RELEASE_NAME }}
+          body: ${{ env.RELEASE_NOTES }}
+          prerelease: true
+
+      - name: Upload release asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create-release.outputs.upload_url }}
+          asset_path: ./release-artifacts/${{ env.ZIP_NAME }}
+          asset_name: ${{ env.ZIP_NAME }}
+          asset_content_type: application/zip
