@@ -59,31 +59,37 @@ jobs:
           ref: android-gs-bluraviole-5.10-android14-qpr2-monolithic
           fetch-depth: 1
           submodules: false
+          path: kernel_source
 
       - name: Detect kernel source directory
         run: |
-          echo "Listing repository contents:"
-          ls -la
-          if [ -f "Makefile" ] && [ -d "arch/arm64/configs" ] && [ -f "arch/arm64/configs/gs101_defconfig" ]; then
-            echo "Kernel source found in repository root"
-            echo "KERNEL_SRC_DIR=." >> $GITHUB_ENV
+          echo "Listing checkout directory contents:"
+          ls -la kernel_source
+          if [ -f "kernel_source/Makefile" ] && [ -d "kernel_source/arch/arm64/configs" ] && [ -f "kernel_source/arch/arm64/configs/gs101_defconfig" ] && [ -d "kernel_source/drivers" ]; then
+            echo "Kernel source found in kernel_source/"
+            echo "KERNEL_SRC_DIR=kernel_source" >> $GITHUB_ENV
+          elif [ -f "kernel_source/android_kernel_google_gs101/Makefile" ] && [ -d "kernel_source/android_kernel_google_gs101/arch/arm64/configs" ] && [ -f "kernel_source/android_kernel_google_gs101/arch/arm64/configs/gs101_defconfig" ] && [ -d "kernel_source/android_kernel_google_gs101/drivers" ]; then
+            echo "Kernel source found in kernel_source/android_kernel_google_gs101/"
+            echo "KERNEL_SRC_DIR=kernel_source/android_kernel_google_gs101" >> $GITHUB_ENV
           else
-            KERNEL_SRC_DIR=$(find . -maxdepth 3 -type f -name "gs101_defconfig" -exec dirname {} \; | head -n 1)
+            KERNEL_SRC_DIR=$(find kernel_source -maxdepth 3 -type f -name "gs101_defconfig" -exec dirname {} \; | head -n 1)
             if [ -z "$KERNEL_SRC_DIR" ]; then
               echo "Error: Could not find kernel source directory with gs101_defconfig" >&2
               exit 1
             fi
             KERNEL_SRC_DIR=$(dirname "$KERNEL_SRC_DIR")
+            if [ ! -d "$KERNEL_SRC_DIR/drivers" ]; then
+              echo "Error: 'drivers/' directory not found in $KERNEL_SRC_DIR" >&2
+              ls -la "$KERNEL_SRC_DIR"
+              exit 1
+            fi
             echo "Kernel source found in $KERNEL_SRC_DIR"
             echo "KERNEL_SRC_DIR=$KERNEL_SRC_DIR" >> $GITHUB_ENV
           fi
-          cd "$KERNEL_SRC_DIR"
           echo "Current directory: $(pwd)"
+          cd "$KERNEL_SRC_DIR"
+          echo "Kernel source directory contents:"
           ls -la
-          if [ ! -d "drivers" ]; then
-            echo "Error: 'drivers/' directory not found in $KERNEL_SRC_DIR" >&2
-            exit 1
-          fi
 
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -157,17 +163,22 @@ jobs:
           restore-keys: |
             ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-
 
-      - name: Clone repositories
+      - name: Clone external repositories
         run: |
+          mkdir -p external_repos
+          cd external_repos
           ANYKERNEL_BRANCH="riri"
           SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
           git clone https://github.com/${{ env.REPO_OWNER }}/AnyKernel3.git -b "$ANYKERNEL_BRANCH" --depth=1
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" --depth=1
           git clone https://github.com/${{ env.REPO_OWNER }}/kernel_patches.git --depth=1
+          echo "External repos directory contents:"
+          ls -la
 
       - name: Add KernelSU
         run: |
           cd "$KERNEL_SRC_DIR"
+          echo "Running KernelSU setup in $(pwd)"
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next || {
             echo "Error: KernelSU setup failed. Dumping directory contents for debugging:"
             ls -la
@@ -175,50 +186,52 @@ jobs:
           }
           cd KernelSU-Next
           if [ -z "${{ inputs.kernelsu_commit_hash }}" ]; then
-            echo "Using latest KernelSU commit"
+            echoing "Using latest KernelSU commit"
             git checkout $(git rev-parse origin/next)
           else
             echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
             git checkout ${{ inputs.kernelsu_commit_hash }}
           fi
           cd ..
+          echo "Post-KernelSU setup directory contents:"
+          ls -la
 
       - name: Apply SUSFS Patches
         run: |
           cd "$KERNEL_SRC_DIR"
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
-          cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cp ../external_repos/susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -r ../external_repos/susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ../external_repos/susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
           cd KernelSU-Next
-          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          cp ../../external_repos/susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
           patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_rules.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_sucompat.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_sucompat.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
-          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_kernel_compat.c.patch ./
+          cp ../../external_repos/kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_kernel_compat.c.patch ./
           patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
           cd ..
 
       - name: Apply KSU Hooks
         run: |
           cd "$KERNEL_SRC_DIR"
-          cp ../kernel_patches/next/next_hooks.patch ./
+          cp ../external_repos/kernel_patches/next/next_hooks.patch ./
           patch -p1 --fuzz=3 < next_hooks.patch
 
       - name: Apply Hide Stuff Patches
         run: |
           cd "$KERNEL_SRC_DIR"
-          cp ../kernel_patches/69_hide_stuff.patch ./
+          cp ../external_repos/kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
 
       - name: Apply KernelSU & SUSFS SUltan Fixes
@@ -297,8 +310,8 @@ jobs:
         run: |
           echo "Listing kernel source directory ($KERNEL_SRC_DIR):"
           ls -R "$KERNEL_SRC_DIR"
-          echo "Listing AnyKernel3 directory:"
-          ls -R AnyKernel3/
+          echo "Listing external_repos directory:"
+          ls -R external_repos/
           if [ -d "$KERNEL_SRC_DIR/out" ]; then
             echo "Listing out directory:"
             ls -R "$KERNEL_SRC_DIR/out"
@@ -311,10 +324,10 @@ jobs:
           mkdir -p artifacts
           cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" artifacts/Image.lz4
           cp "$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" artifacts/dtbo.img
-          cd AnyKernel3
-          cp "../$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" ./Image.lz4
-          cp "../$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" ./dtbo.img
-          zip -r ../artifacts/gs101.zip ./*
+          cd external_repos/AnyKernel3
+          cp "../../$KERNEL_SRC_DIR/out/arch/arm64/boot/Image.lz4" ./Image.lz4
+          cp "../../$KERNEL_SRC_DIR/out/arch/arm64/boot/dts/google/dtbo.img" ./dtbo.img
+          zip -r ../../artifacts/gs101.zip ./*
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
