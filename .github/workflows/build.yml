@@ -55,9 +55,9 @@ jobs:
     runs-on: ubuntu-latest
     if: ${{ inputs.make_release }}
     outputs:
-      KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION || '1.0.9' }}
-      KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION || '12797' }}
-      SUSFS_VERSION: ${{ steps.extract_versions.outputs.SUSFS_VERSION || '1.5.9' }}
+      KSU_VERSION: ${{ steps.set_outputs.outputs.KSU_VERSION }}
+      KSU_SUBVERSION: ${{ steps.set_outputs.outputs.KSU_SUBVERSION }}
+      SUSFS_VERSION: ${{ steps.set_outputs.outputs.SUSFS_VERSION }}
 
     steps:
       - name: Check if test release
@@ -68,6 +68,19 @@ jobs:
             echo "skip_build=true" >> $GITHUB_OUTPUT
           else
             echo "skip_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set default outputs for test release
+        id: set_outputs
+        run: |
+          if [ "${{ steps.check_test_release.outputs.skip_build }}" == "true" ]; then
+            echo "KSU_VERSION=1.0.9" >> $GITHUB_OUTPUT
+            echo "KSU_SUBVERSION=12797" >> $GITHUB_OUTPUT
+            echo "SUSFS_VERSION=1.5.9" >> $GITHUB_OUTPUT
+          else
+            echo "KSU_VERSION=" >> $GITHUB_OUTPUT
+            echo "KSU_SUBVERSION=" >> $GITHUB_OUTPUT
+            echo "SUSFS_VERSION=" >> $GITHUB_OUTPUT
           fi
 
       - name: Maximize build space
@@ -267,6 +280,13 @@ jobs:
           name: kernel-gs101
           path: ./gs101.zip
 
+      - name: Update outputs with extracted versions
+        if: ${{ steps.check_test_release.outputs.skip_build == 'false' }}
+        run: |
+          echo "KSU_VERSION=${{ steps.extract_versions.outputs.KSU_VERSION }}" >> $GITHUB_OUTPUT
+          echo "KSU_SUBVERSION=${{ steps.extract_versions.outputs.KSU_SUBVERSION }}" >> $GITHUB_OUTPUT
+          echo "SUSFS_VERSION=${{ steps.extract_versions.outputs.SUSFS_VERSION }}" >> $GITHUB_OUTPUT
+
   trigger-release:
     runs-on: ubuntu-latest
     needs: [build-kernel]
@@ -274,19 +294,24 @@ jobs:
     steps:
       - name: Setup version info
         run: |
-          if [ "${{ inputs.test_release }}" == "true" ]; then
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_12797_SUSFS_1.5.9.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=BluRaviole v1.5.9 TEST" >> $GITHUB_ENV
-            echo "KSU_VERSION=1.0.9" >> $GITHUB_ENV
-            echo "KSU_SUBVERSION=12797" >> $GITHUB_ENV
-            echo "SUSFS_VERSION=1.5.9" >> $GITHUB_ENV
-          else
-            echo "ZIP_NAME=BluRaviole_KSU_NEXT_${{ needs.build-kernel.outputs.KSU_SUBVERSION }}_SUSFS_${{ needs.build-kernel.outputs.SUSFS_VERSION }}.zip" >> $GITHUB_ENV
-            echo "RELEASE_NAME=BluRaviole v${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
-            echo "KSU_VERSION=${{ needs.build-kernel.outputs.KSU_VERSION }}" >> $GITHUB_ENV
-            echo "KSU_SUBVERSION=${{ needs.build-kernel.outputs.KSU_SUBVERSION }}" >> $GITHUB_ENV
-            echo "SUSFS_VERSION=${{ needs.build-kernel.outputs.SUSFS_VERSION }}" >> $GITHUB_ENV
+          KSU_VERSION="${{ needs.build-kernel.outputs.KSU_VERSION }}"
+          KSU_SUBVERSION="${{ needs.build-kernel.outputs.KSU_SUBVERSION }}"
+          SUSFS_VERSION="${{ needs.build-kernel.outputs.SUSFS_VERSION }}"
+          if [ -z "$KSU_VERSION" ] || [ -z "$KSU_SUBVERSION" ] || [ -z "$SUSFS_VERSION" ]; then
+            echo "Using default versions for test release"
+            KSU_VERSION="1.0.9"
+            KSU_SUBVERSION="12797"
+            SUSFS_VERSION="1.5.9"
           fi
+          echo "ZIP_NAME=BluRaviole_KSU_NEXT_${KSU_SUBVERSION}_SUSFS_${SUSFS_VERSION}.zip" >> $GITHUB_ENV
+          if [ "${{ inputs.test_release }}" == "true" ]; then
+            echo "RELEASE_NAME=BluRaviole v${SUSFS_VERSION} TEST" >> $GITHUB_ENV
+          else
+            echo "RELEASE_NAME=BluRaviole v${SUSFS_VERSION}" >> $GITHUB_ENV
+          fi
+          echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_ENV
+          echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_ENV
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_ENV
 
       - name: Construct release notes
         run: |
@@ -312,11 +337,10 @@ jobs:
         id: generate_tag
         run: |
           if [ "${{ inputs.test_release }}" == "true" ]; then
-            BASE_TAG="test-v1.5.9"
+            BASE_TAG="test-v${{ env.SUSFS_VERSION }}"
           else
-            BASE_TAG="v${{ needs.build-kernel.outputs.SUSFS_VERSION }}"
+            BASE_TAG="v${{ env.SUSFS_VERSION }}"
           fi
-
           TAG_COUNTER=1
           while true; do
             PROPOSED_TAG="${BASE_TAG}-r${TAG_COUNTER}"
