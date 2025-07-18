@@ -400,13 +400,22 @@ jobs:
         if: ${{ inputs.test_release }}
         run: |
           mkdir -p ./release-artifacts
-          echo "This is a TEST release artifact - not for actual use" > "./release-artifacts/${{ env.ZIP_NAME }}"
+          # Create a valid ZIP file for test releases
+          echo "Test release artifact - not for actual use" > test-readme.txt
+          zip -j "./release-artifacts/${{ env.ZIP_NAME }}" test-readme.txt
+
+      - name: Verify test asset
+        if: ${{ inputs.test_release }}
+        run: |
+          if ! unzip -t "./release-artifacts/${{ env.ZIP_NAME }}"; then
+            echo "::error::Test artifact is not a valid ZIP file"
+            exit 1
+          fi
 
       - name: Rename artifact
+        if: ${{ !inputs.test_release }}
         run: |
-          if [ "${{ inputs.test_release }}" != "true" ]; then
-            mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
-          fi
+          mv ./release-artifacts/gs101.zip "./release-artifacts/${{ env.ZIP_NAME }}"
 
       - name: Upload release asset
         uses: actions/upload-release-asset@v1
