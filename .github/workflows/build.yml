@@ -48,7 +48,7 @@ env:
   REPO_OWNER: "RiRiRawrZ615"
   REPO_NAME: "android_kernel_google_gs101"
   KERNEL_VERSION: "5.10.209"
-  STOCK_PATCH: "ΑΡ1Α.240505.004"
+  STOCK_PATCH: "AP1A.240505.004"
 
 jobs:
   build-kernel:
