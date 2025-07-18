@@ -48,7 +48,7 @@ env:
 jobs:
   build-kernel:
     runs-on: ubuntu-latest
-    if: ${{ !inputs.test_release || inputs.make_release }}  # Run if not test release OR if make_release is true
+    if: ${{ !inputs.test_release }}  # ONLY run if test_release is FALSE
     outputs:
       KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION }}
       KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION }}
@@ -85,7 +85,6 @@ jobs:
       - name: Set CONFIG directory
         run: |
           echo "CONFIG_DIR=android_kernel_google_gs101" >> $GITHUB_ENV
-          echo "Kernel directory set to: android_kernel_google_gs101"
 
       - name: Add KernelSU
         run: |
@@ -220,7 +219,7 @@ jobs:
   trigger-release:
     runs-on: ubuntu-latest
     needs: build-kernel
-    if: ${{ inputs.make_release }}  # Only depends on make_release, not test_release
+    if: ${{ inputs.make_release }}  # Only depends on make_release
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
