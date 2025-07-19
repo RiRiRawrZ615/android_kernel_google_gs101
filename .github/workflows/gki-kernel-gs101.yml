@@ -1,0 +1,344 @@
+name: Build Kernel - Android 13 5.10 for gs101
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_call:
+    inputs:
+      make_release:
+        required: true
+        type: boolean
+        default: true
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
+      sub_level:
+        required: true
+        type: string
+      os_patch_level:
+        required: true
+        type: string
+      kernelsu_variant:
+        required: true
+        type: string
+        default: "Next"
+      kernelsu_branch:
+        required: true
+        type: string
+        default: "Dev"
+      kernelsu_branch_other:
+        required: false
+        type: string
+      kernelsu_commit_hash:
+        required: false
+        type: string
+      susfs_version:
+        required: true
+        type: string
+        default: "v1.5.9"
+
+jobs:
+  build-gki:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      REPO_OWNER: RiRiRawrZ615
+      REPO_NAME: android_kernel_google_gs101
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu zip
+
+      - name: Set CONFIG Environment Variable
+        run: |
+          CONFIG="android_kernel_google_gs101-${{ inputs.sub_level }}"
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "KERNEL_SRC_DIR=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG set to: $CONFIG"
+
+      - name: Clone AnyKernel3 and Other Dependencies
+        run: |
+          ANYKERNEL_BRANCH="riri"
+          SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
+          mkdir -p "$CONFIG/AnyKernel3"
+          git clone https://github.com/${{ env.REPO_OWNER }}/AnyKernel3.git -b "$ANYKERNEL_BRANCH" --depth=1 "$CONFIG/AnyKernel3"
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" --depth=1
+          git clone https://github.com/${{ env.REPO_OWNER }}/kernel_patches.git --depth=1
+          git clone https://github.com/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}.git -b android-gs-bluraviole-5.10-android14-qpr2-monolithic "$CONFIG"
+
+      - name: Verify checkout
+        run: |
+          echo "Listing working directory contents:"
+          ls -la
+          if [ ! -d "$CONFIG/arch" ] || [ ! -f "$CONFIG/Makefile" ] || [ ! -f "$CONFIG/arch/arm64/configs/gs101_defconfig" ] || [ ! -d "$CONFIG/drivers" ]; then
+            echo "Error: Kernel source files not found in $CONFIG. Expected Makefile, arch/arm64/configs/gs101_defconfig, and drivers/." >&2
+            exit 1
+          fi
+          echo "Kernel source files verified in $CONFIG"
+
+      - name: Determine the branch for KernelSU
+        run: |
+          if [ "${{ inputs.kernelsu_branch }}" == "Stable" ]; then
+            echo "BRANCH=-" >> $GITHUB_ENV
+          elif [ "${{ inputs.kernelsu_branch }}" == "Dev" ] || [ -z "${{ inputs.kernelsu_branch }}" ]; then
+            echo "BRANCH=-s next" >> $GITHUB_ENV
+          elif [ "${{ inputs.kernelsu_branch }}" == "Other" ] && [ -n "${{ inputs.kernelsu_branch_other }}" ]; then
+            echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "Error: Custom branch not provided for 'Other'" >&2
+            exit 1
+          fi
+
+      - name: Add KernelSU
+        run: |
+          cd "$CONFIG"
+          echo "Adding KernelSU Next..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next || {
+            echo "Error: KernelSU setup failed. Dumping directory contents for debugging:"
+            ls -la
+            exit 1
+          }
+          cd KernelSU-Next
+          if [ -n "${{ inputs.kernelsu_commit_hash }}" ]; then
+            echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
+            git checkout ${{ inputs.kernelsu_commit_hash }}
+          fi
+          cd ..
+
+      - name: Apply SUSFS Patches
+        run: |
+          cd "$CONFIG"
+          echo "Applying SUSFS patches..."
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+          cd KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+          cd ..
+
+      - name: Apply KSU Hooks
+        run: |
+          cd "$CONFIG"
+          cp ../kernel_patches/next/next_hooks.patch ./
+          patch -p1 --fuzz=3 < next_hooks.patch
+
+      - name: Apply Hide Stuff Patches
+        run: |
+          cd "$CONFIG"
+          cp ../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: Apply KernelSU & SUSFS SUltan Fixes
+        run: |
+          cd "$CONFIG"
+          sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
+          sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
+
+      - name: Add SUSFS Configuration Settings
+        run: |
+          cd "$CONFIG"
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gs101_defconfig
+
+      - name: Download and Extract Toolchain
+        run: |
+          TOOLCHAIN_TAR="x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz"
+          TOOLCHAIN_DIR="gcc-14.2.0-nolibc/aarch64-linux"
+          wget https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/$TOOLCHAIN_TAR
+          tar -xzf $TOOLCHAIN_TAR
+          TOOLCHAIN_PATH="$PWD/$TOOLCHAIN_DIR"
+          if [ ! -d "$TOOLCHAIN_PATH" ]; then
+            echo "Error: Toolchain directory not found!"
+            exit 1
+          fi
+          echo "TOOLCHAIN_PATH=$TOOLCHAIN_PATH" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN_PATH/bin/aarch64-linux-gcc" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$TOOLCHAIN_PATH/bin/aarch64-linux-" >> $GITHUB_ENV
+          echo "PATH=$TOOLCHAIN_PATH/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Verify Toolchain
+        run: |
+          $CC --version
+
+      - name: Build kernel
+        run: |
+          cd "$CONFIG"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-
+          export CC=aarch64-linux-gcc
+          make gs101_defconfig -j$(nproc --all)
+          make -j$(nproc --all)
+
+      - name: Create Boot Images and ZIP Files
+        run: |
+          echo "===== Starting Boot Image and ZIP Creation ====="
+          cd "$CONFIG"
+
+          # 1. Create bootimgs directory and copy files
+          echo "Copying kernel images..."
+          mkdir -p bootimgs
+          cp -v ./arch/arm64/boot/Image.lz4 ./bootimgs/Image.lz4 || { echo "ERROR: Image.lz4 missing"; exit 1; }
+          cp -v ./arch/arm64/boot/dts/google/dtbo.img ./bootimgs/dtbo.img || { echo "ERROR: dtbo.img missing"; exit 1; }
+
+          # 2. Prepare files for AnyKernel3
+          echo "Preparing AnyKernel3 files..."
+          cp -v ./bootimgs/Image.lz4 "$CONFIG/AnyKernel3/Image.lz4" || { echo "ERROR: Failed to copy Image.lz4"; exit 1; }
+          cp -v ./bootimgs/dtbo.img "$CONFIG/AnyKernel3/dtbo.img" || { echo "ERROR: Failed to copy dtbo.img"; exit 1; }
+
+          # 3. Create ZIP files
+          echo "Creating ZIP archives..."
+          mkdir -p release
+          cd AnyKernel3
+
+          # Get KernelSU version or use default
+          KSUVER=$(cat ../KernelSU-Next/version 2>/dev/null || echo "v0.0.0")
+          echo "Using KernelSU version: $KSUVER"
+
+          # Create ZIP
+          if [ -f Image.lz4 ] && [ -f dtbo.img ]; then
+            echo "Creating gs101 ZIP..."
+            zip -r9 "../release/${{ inputs.kernelsu_variant }}-$KSUVER-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-gs101.zip" ./*
+          else
+            echo "ERROR: Required files (Image.lz4 or dtbo.img) missing!"
+            exit 1
+          fi
+
+          # 4. Verify outputs
+          echo "Final artifacts:"
+          ls -lh ../release/
+          [ "$(ls -A ../release/)" ] || { echo "ERROR: No ZIP files created!"; exit 1; }
+
+          echo "===== Boot Image and ZIP Creation Complete ====="
+
+      - name: Android 13/14/15 boot image build script
+        run: |
+          cd "$CONFIG/bootimgs"
+          echo "Building boot-lz4.img for gs101..."
+          $MKBOOTIMG --header_version 4 --kernel Image.lz4 --dt dtbo.img --output boot-lz4.img
+          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-lz4.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
+          cp ./boot-lz4.img "../${{ inputs.kernelsu_variant }}-$KSUVER-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-gs101-boot-lz4.img"
+
+      - name: Compress all img files with gzip
+        run: |
+          cd "$CONFIG/bootimgs"
+          for image in *.img; do
+            if [ -f "$image" ]; then
+              gzip -vnf9 "$image" -c > "${image}.gz"
+            fi
+          done
+          echo "Listing bootimgs directory after compression:"
+          ls -l .
+
+      - name: Create Release
+        if: ${{ inputs.make_release }}
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: ${{ env.CONFIG }}/release/*.zip
+          tag_name: ${{ inputs.kernelsu_variant }}-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-gs101
+          name: Release ${{ inputs.kernelsu_variant }}-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-gs101
+          draft: false
+          prerelease: false
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.CONFIG }}
+          path: |
+            ${{ env.CONFIG }}/release/*.zip
+            ${{ env.CONFIG }}/bootimgs/*.img.gz
+            ${{ env.CONFIG }}/bootimgs/boot-lz4.img
+            ${{ env.CONFIG }}/bootimgs/Image.lz4
+            ${{ env.CONFIG }}/bootimgs/dtbo.img
+            ${{ env.CONFIG }}/*-boot-lz4.img
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Check for .rej files
+        if: failure()
+        run: |
+          echo "::group::Checking for .rej files..."
+          REJ_FILES=$(find "$CONFIG" -name '*.rej')
+          if [ -z "$REJ_FILES" ]; then
+            echo "No .rej files found."
+          else
+            echo "Found .rej files:"
+            echo "$REJ_FILES"
+            for f in $REJ_FILES; do
+              echo "--- $f ---"
+              cat "$f"
+            done
+          fi
+          echo "::endgroup::"
+
+      - name: Upload .rej files as artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-rejects
+          path: "${{ env.CONFIG }}/**/*.rej"
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false

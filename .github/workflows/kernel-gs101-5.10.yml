@@ -1,0 +1,61 @@
+name: Android 13 gs101 5.10
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: 'Do you want to create a release?'
+        required: true
+        type: boolean
+        default: true
+      kernelsu_variant:
+        description: "Choose KernelSU (must be 'Next')"
+        required: true
+        type: string
+        default: "Next"
+      kernelsu_branch:
+        description: "Choose ksu branch (must be 'Stable', 'Dev', or 'Other')"
+        required: true
+        type: string
+        default: "Dev"
+      kernelsu_branch_other:
+        description: "If 'Other' is selected, specify your custom branch"
+        required: false
+        type: string
+        default: ""
+      kernelsu_commit_hash:
+        description: "Specify the GitHub commit hash for KernelSU Next (leave blank for latest)"
+        required: false
+        type: string
+      susfs_version:
+        description: "Specify the SUSFS version"
+        required: true
+        type: string
+        default: "v1.5.9"
+
+jobs:
+  build-kernel-gs101-kernelsu-susfs:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sub_level: "209"
+            os_patch_level: "2023-11"
+
+    uses: ./.github/workflows/gki-kernel-gs101.yml
+    secrets: inherit
+    with:
+      make_release: ${{ inputs.make_release }}
+      android_version: "android13"
+      kernel_version: "5.10"
+      sub_level: ${{ matrix.sub_level }}
+      os_patch_level: ${{ matrix.os_patch_level }}
+      kernelsu_variant: ${{ inputs.kernelsu_variant }}
+      kernelsu_branch: ${{ inputs.kernelsu_branch }}
+      kernelsu_branch_other: ${{ inputs.kernelsu_branch_other }}
+      kernelsu_commit_hash: ${{ inputs.kernelsu_commit_hash }}
+      susfs_version: ${{ inputs.susfs_version }}
