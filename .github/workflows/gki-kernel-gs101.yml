@@ -1,0 +1,517 @@
+name: Build Kernel - Android 13 5.10 for gs101
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_call:
+    inputs:
+      make_release:
+        required: true
+        type: boolean
+        default: true
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
+      sub_level:
+        required: true
+        type: string
+      os_patch_level:
+        required: true
+        type: string
+      kernelsu_variant:
+        required: true
+        type: string
+        default: "Next"
+      kernelsu_branch:
+        required: true
+        type: string
+        default: "Dev"
+      kernelsu_branch_other:
+        required: false
+        type: string
+      kernelsu_commit_hash:
+        required: false
+        type: string
+      susfs_version:
+        required: true
+        type: string
+        default: "v1.5.9"
+
+jobs:
+  build-gki:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+      REPO_OWNER: RiRiRawrZ615
+      REPO_NAME: android_kernel_google_gs101
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y gcc-aarch64-linux-gnu zip
+
+      - name: Set CONFIG Environment Variable
+        run: |
+          CONFIG="android_kernel_google_gs101-${{ inputs.sub_level }}"
+          ANYKERNEL_BRANCH="riri"
+          SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "ANYKERNEL_BRANCH=$ANYKERNEL_BRANCH" >> $GITHUB_ENV
+          echo "SUSFS_BRANCH=$SUSFS_BRANCH" >> $GITHUB_ENV
+          echo "KERNEL_SRC_DIR=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG set to: $CONFIG, ANYKERNEL_BRANCH set to: $ANYKERNEL_BRANCH, SUSFS_BRANCH set to: $SUSFS_BRANCH"
+
+      - name: Debug Initial Directory State
+        run: |
+          echo "Initial directory contents:"
+          ls -la
+          if [ -d "$CONFIG" ]; then
+            echo "Existing $CONFIG directory contents:"
+            ls -la "$CONFIG"
+          else
+            echo "$CONFIG directory does not exist yet."
+          fi
+
+      - name: Clean and Recreate CONFIG Directory
+        run: |
+          if [ -d "$CONFIG" ]; then
+            echo "Removing existing $CONFIG directory..."
+            rm -rf "$CONFIG" || { echo "Failed to remove $CONFIG"; exit 1; }
+          fi
+          mkdir -p "$CONFIG" || { echo "Failed to create $CONFIG"; exit 1; }
+          echo "Recreated $CONFIG directory is empty:"
+          ls -la "$CONFIG"
+
+      - name: Clone Kernel Repository
+        run: |
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
+          git clone https://github.com/${{ env.REPO_OWNER }}/${{ env.REPO_NAME }}.git -b android-gs-bluraviole-5.10-android14-qpr2-monolithic "$CONFIG"
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" --depth=1
+          git clone https://github.com/${{ env.REPO_OWNER }}/kernel_patches.git --depth=1
+
+      - name: Clone AnyKernel3
+        run: |
+          echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
+          git clone https://github.com/${{ env.REPO_OWNER }}/AnyKernel3.git -b "$ANYKERNEL_BRANCH" --depth=1 "$CONFIG/AnyKernel3" || {
+            echo "Clone failed, checking branch availability..."
+            git ls-remote --heads https://github.com/${{ env.REPO_OWNER }}/AnyKernel3.git | grep "refs/heads/$ANYKERNEL_BRANCH" || echo "Branch $ANYKERNEL_BRANCH not found in remote repository."
+            exit 1
+          }
+
+      - name: Verify checkout
+        run: |
+          echo "Listing working directory contents:"
+          ls -la
+          if [ ! -d "$CONFIG/arch" ] || [ ! -f "$CONFIG/Makefile" ] || [ ! -f "$CONFIG/arch/arm64/configs/gs101_defconfig" ] || [ ! -d "$CONFIG/drivers" ]; then
+            echo "Error: Kernel source files not found in $CONFIG. Expected Makefile, arch/arm64/configs/gs101_defconfig, and drivers/." >&2
+            exit 1
+          fi
+          echo "Kernel source files verified in $CONFIG"
+
+      - name: Determine the branch for KernelSU
+        run: |
+          if [ "${{ inputs.kernelsu_branch }}" == "Stable" ]; then
+            echo "BRANCH=-" >> $GITHUB_ENV
+          elif [ "${{ inputs.kernelsu_branch }}" == "Dev" ] || [ -z "${{ inputs.kernelsu_branch }}" ]; then
+            echo "BRANCH=-s next" >> $GITHUB_ENV
+          elif [ "${{ inputs.kernelsu_branch }}" == "Other" ] && [ -n "${{ inputs.kernelsu_branch_other }}" ]; then
+            echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "Error: Custom branch not provided for 'Other'" >&2
+            exit 1
+          fi
+
+      - name: Add KernelSU
+        run: |
+          cd "$CONFIG"
+          echo "Adding KernelSU Next..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next || {
+            echo "Error: KernelSU setup failed. Dumping directory contents for debugging:"
+            ls -la
+            exit 1
+          }
+          cd KernelSU-Next
+          if [ -n "${{ inputs.kernelsu_commit_hash }}" ]; then
+            echo "Using specified KernelSU commit: ${{ inputs.kernelsu_commit_hash }}"
+            git checkout ${{ inputs.kernelsu_commit_hash }}
+          fi
+          cd ..
+
+      - name: Apply SUSFS Patches
+        run: |
+          cd "$CONFIG"
+          echo "Applying SUSFS patches..."
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./
+          cp -r ../susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          patch -p1 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch || true
+          cd KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_apk_sign.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_selinux.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_ksud.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/${{ inputs.susfs_version }}/fix_rules.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+          cd ..
+
+      - name: Apply KSU Hooks
+        run: |
+          cd "$CONFIG"
+          cp ../kernel_patches/next/next_hooks.patch ./
+          patch -p1 --fuzz=3 < next_hooks.patch
+
+      - name: Apply Hide Stuff Patches
+        run: |
+          cd "$CONFIG"
+          cp ../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: Apply KernelSU & SUSFS SUltan Fixes
+        run: |
+          cd "$CONFIG"
+          sed -i "s/poofed_size: '%u'/poofed_size: '%llu'/g" ./fs/susfs.c
+          sed -i "s/length of string: %u/length of string: %lu/g" ./fs/susfs.c
+
+      - name: Add SUSFS Configuration Settings
+        run: |
+          cd "$CONFIG"
+          echo "CONFIG_KSU=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/gs101_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gs101_defconfig
+
+      - name: Download and Extract Toolchain
+        run: |
+          TOOLCHAIN_TAR="x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz"
+          TOOLCHAIN_DIR="gcc-14.2.0-nolibc/aarch64-linux"
+          wget https://mirrors.edge.kernel.org/pub/tools/crosstool/files/bin/x86_64/14.2.0/$TOOLCHAIN_TAR
+          tar -xzf $TOOLCHAIN_TAR
+          TOOLCHAIN_PATH="$PWD/$TOOLCHAIN_DIR"
+          if [ ! -d "$TOOLCHAIN_PATH" ]; then
+            echo "Error: Toolchain directory not found!"
+            exit 1
+          fi
+          echo "TOOLCHAIN_PATH=$TOOLCHAIN_PATH" >> $GITHUB_ENV
+          echo "CC=$TOOLCHAIN_PATH/bin/aarch64-linux-gcc" >> $GITHUB_ENV
+          echo "CROSS_COMPILE=$TOOLCHAIN_PATH/bin/aarch64-linux-" >> $GITHUB_ENV
+          echo "PATH=$TOOLCHAIN_PATH/bin:$PATH" >> $GITHUB_ENV
+
+      - name: Verify Toolchain
+        run: |
+          $CC --version
+
+      - name: Build kernel
+        run: |
+          cd "$CONFIG"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-
+          export CC=aarch64-linux-gcc
+          # Set UTS_VERSION and CONFIG_LOCALVERSION based on provided string
+          export UTS_VERSION="Mon Dec 4 18:59:42 UTC 2023"
+          export CONFIG_LOCALVERSION="-android13-4-00012-g1217bb583cc5-ab11174560"
+          make O=out gs101_defconfig -j$(nproc --all)
+          make O=out -j$(nproc --all)
+
+      - name: Copy All Build Artifacts
+        run: |
+          cd "$CONFIG"
+          echo "Copying all build artifacts to AnyKernel3..."
+          # Copy known images
+          cp -v ./out/arch/arm64/boot/Image.lz4 ./AnyKernel3/Image.lz4 || { echo "ERROR: Image.lz4 missing"; exit 1; }
+          cp -v ./out/arch/arm64/boot/dts/google/dtbo.img ./AnyKernel3/dtbo.img || { echo "ERROR: dtbo.img missing"; exit 1; }
+          # Search for additional files in out directory
+          for file in vendor_boot.img vendor_dlkm.img license; do
+            if [ -f "./out/arch/arm64/boot/$file" ] || [ -f "./out/$file" ]; then
+              cp -v "./out/arch/arm64/boot/$file" ./AnyKernel3/$file 2>/dev/null || cp -v "./out/$file" ./AnyKernel3/$file || echo "WARNING: $file not found in out directory"
+            fi
+          done
+          # Copy tools and META-INF if present in out or build artifacts
+          if [ -d "./out/tools" ]; then
+            cp -rv ./out/tools ./AnyKernel3/ || echo "WARNING: tools directory not found in out"
+          fi
+          if [ -d "./out/META-INF" ]; then
+            cp -rv ./out/META-INF ./AnyKernel3/ || echo "WARNING: META-INF directory not found in out"
+          fi
+          # Add anykernel.sh
+          cat > ./AnyKernel3/anykernel.sh << 'EOF'
+# AnyKernel3 Ramdisk Mod Script
+# osm0sis @ xda-developers
+
+## AnyKernel setup
+# begin properties
+properties() { '
+kernel.string=Kernel pixel 6a/6/6 pro - v14
+do.devicecheck=1
+do.modules=1
+do.systemless=1
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=raven
+device.name2=oriole
+device.name3=bluejay
+supported.versions=14
+supported.sdk=34
+supported.patchlevels=2024-03 -
+'; } # end properties
+
+# shell variables
+block=boot;
+is_slot_device=1;
+ramdisk_compression=auto;
+patch_vbmeta_flag=auto;
+
+
+## AnyKernel methods (DO NOT CHANGE)
+# import patching functions/variables - see for reference
+. tools/ak3-core.sh;
+
+
+## AnyKernel file attributes
+# set permissions/ownership for included ramdisk files
+set_perm_recursive 0 0 755 644 $ramdisk/*;
+set_perm_recursive 0 0 750 750 $ramdisk/init* $ramdisk/sbin;
+
+
+## AnyKernel boot install
+dump_boot;
+
+
+write_boot;
+## end boot install
+
+
+# shell variables
+#block=vendor_boot;
+#is_slot_device=1;
+#ramdisk_compression=auto;
+
+# reset for vendor_boot patching
+#reset_ak;
+
+
+## AnyKernel vendor_boot install
+#split_boot; # skip unpack/repack ramdisk since we don't need vendor_ramdisk access
+
+#flash_boot;
+## end vendor_boot install
+EOF
+
+      - name: Create AnyKernel3 zip
+        run: |
+          cd "$CONFIG/AnyKernel3"
+          echo "Creating gs101.zip..."
+          zip -r9 "../../gs101.zip" ./*
+          cd ../..
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.CONFIG }}
+          path: |
+            ./gs101.zip
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Create Release
+        if: ${{ inputs.make_release }}
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_OWNER: ${{ env.REPO_OWNER }}
+          REPO_NAME: ${{ env.REPO_NAME }}
+        with:
+          files: ./gs101.zip
+          tag_name: ${{ env.NEW_TAG }}
+          name: ${{ env.RELEASE_NAME }}
+          body: ${{ env.RELEASE_NOTES }}
+          draft: false
+          prerelease: true
+
+    extract-versions:
+      runs-on: ubuntu-22.04
+      needs: build-gki
+      outputs:
+        KSU_VERSION: ${{ steps.extract_versions.outputs.KSU_VERSION }}
+        KSU_SUBVERSION: ${{ steps.extract_versions.outputs.KSU_SUBVERSION }}
+        SUSFS_VERSION: ${{ steps.extract_versions.outputs.SUSFS_VERSION }}
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+
+        - name: Extract KernelSU and SUSFS versions
+          id: extract_versions
+          run: |
+            cd "$CONFIG"
+            # Extract KernelSU version
+            KSU_VERSION=$(grep -oP 'KERNELSU_VERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+            KSU_SUBVERSION=$(grep -oP 'KERNELSU_SUBVERSION := \K.*' KernelSU/version.mk | tr -d '[:space:]')
+            # Extract SUSFS version
+            SUSFS_VERSION=$(grep -oP 'SUSFS_VERSION := \K.*' fs/susfs/version.mk | tr -d '[:space:]')
+            echo "KSU_VERSION=$KSU_VERSION" >> $GITHUB_OUTPUT
+            echo "KSU_SUBVERSION=$KSU_SUBVERSION" >> $GITHUB_OUTPUT
+            echo "SUSFS_VERSION=$SUSFS_VERSION" >> $GITHUB_OUTPUT
+            echo "Versions extracted:"
+            echo "KernelSU: $KSU_VERSION-$KSU_SUBVERSION"
+            echo "SUSFS: $SUSFS_VERSION"
+
+    trigger-release:
+      runs-on: ubuntu-22.04
+      needs: [build-gki, extract-versions]
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        REPO_OWNER: ${{ env.REPO_OWNER }}
+        REPO_NAME: ${{ env.REPO_NAME }}
+        RELEASE_NAME: "BluRaviole_KSU_${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} & SUSFS v${{ needs.extract-versions.outputs.SUSFS_VERSION }}"
+        RELEASE_NOTES: |
+          This release contains KSU-${{ inputs.kernelsu_variant }} ${{ inputs.kernelsu_branch }} and SUSFS v${{ needs.extract-versions.outputs.SUSFS_VERSION }}
+          
+          Features:
+          -> KernelSU-${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }} (v${{ needs.extract-versions.outputs.KSU_VERSION }}-${{ needs.extract-versions.outputs.KSU_SUBVERSION }})
+          -> SUSFS v${{ needs.extract-versions.outputs.SUSFS_VERSION }}
+          -> Manual Hooks for Better Hiding
+          -> CASS (Capacity Aware Super Scheduler) Support
+          -> Magic Mount Support
+          -> BBR Support
+
+          Notes:
+          -> SUS SU Mode 2 will show as disabled or not compatible due to non-kprobe hooks and is not needed anymore!
+          -> Kernel Flasher is broken with latest susfs, try https://github.com/libxzr/HorizonKernelFlasher!
+
+          Module:
+          -> https://github.com/sidex15/ksu_module_susfs
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v3
+
+        - name: Get commit hash or tag and generate URL for KernelSU-${{ inputs.kernelsu_variant }}
+          run: |
+            REPO_URL="https://github.com/KernelSU-Next/KernelSU-Next.git"
+            REPO_URL2="KernelSU-Next/KernelSU-Next"
+            COMMIT_HASH=$(git ls-remote $REPO_URL refs/heads/${{ inputs.kernelsu_branch }} | awk '{ print $1 }')
+            KSU_REF=$COMMIT_HASH
+            KSU_URL="https://github.com/$REPO_URL2/commit/$COMMIT_HASH"
+            echo "KSU_REF=$KSU_REF" >> $GITHUB_ENV
+            echo "KSU_URL=$KSU_URL" >> $GITHUB_ENV
+            echo "KernelSU Reference: $KSU_REF"
+            echo "KernelSU URL: $KSU_URL"
+
+        - name: Get commit hashes and generate commit URLs
+          run: |
+            GITLAB_OWNER="simonpunk"
+            GITLAB_REPO="susfs4ksu"
+            BRANCH_NAME="gki-android13-5.10"
+            COMMIT_HASH=$(git ls-remote https://gitlab.com/$GITLAB_OWNER/$GITLAB_REPO.git refs/heads/$BRANCH_NAME | awk '{ print $1 }')
+            if [[ -n "$COMMIT_HASH" ]]; then
+              COMMIT_URL="https://gitlab.com/$GITLAB_OWNER/$GITLAB_REPO/-/commit/$COMMIT_HASH"
+              echo "$BRANCH_NAME Commit: $COMMIT_HASH"
+              echo "$BRANCH_NAME Commit URL: $COMMIT_URL"
+              echo "COMMIT_HASH=$COMMIT_HASH" >> $GITHUB_ENV
+              echo "COMMIT_URL=$COMMIT_URL" >> $GITHUB_ENV
+            fi
+
+        - name: Append Commit Hashes & Links to `RELEASE_NOTES`
+          run: |
+            echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
+            echo "$RELEASE_NOTES" >> $GITHUB_ENV
+            echo "" >> $GITHUB_ENV
+            echo "LTO: thin" >> $GITHUB_ENV
+            echo "" >> $GITHUB_ENV
+            echo "Commit Hashes and Links:" >> $GITHUB_ENV
+            echo "KernelSU:" >> $GITHUB_ENV
+            echo "${{ inputs.kernelsu_variant }}-${{ inputs.kernelsu_branch }}: [$KSU_REF]($KSU_URL)" >> $GITHUB_ENV
+            echo "SUSFS4KSU:" >> $GITHUB_ENV
+            echo "gki-android13-5.10: [$COMMIT_HASH]($COMMIT_URL)" >> $GITHUB_ENV
+            echo "" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+
+        - name: Generate and Create New Tag
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          run: |
+            LATEST_TAG=$(gh api repos/$REPO_OWNER/$REPO_NAME/tags --jq '.[0].name')
+            if [ -z "$LATEST_TAG" ]; then
+              LATEST_TAG="v1.5.7-r0"
+            fi
+            NEW_TAG=$(echo "$LATEST_TAG" | awk -F'-r' '{suffix=$2; if (!suffix) suffix=0; suffix++; printf "%s-r%d", $1, suffix}')
+            echo "New tag: $NEW_TAG"
+            echo "NEW_TAG=${NEW_TAG}" >> $GITHUB_ENV
+            git tag $NEW_TAG
+            git push --tags
+
+        - name: Download Artifacts
+          uses: actions/download-artifact@v4
+          with:
+            name: kernel-${{ env.CONFIG }}
+            path: ./downloaded-artifacts
+
+        - name: Create GitHub Release
+          uses: actions/create-release@v1
+          with:
+            tag_name: ${{ env.NEW_TAG }}
+            prerelease: true
+            release_name: ${{ env.RELEASE_NAME }}
+            body: ${{ env.RELEASE_NOTES }}
+
+        - name: Upload Release Asset
+          uses: actions/upload-release-asset@v1
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          with:
+            upload_url: ${{ steps.create-release.outputs.upload_url }}
+            asset_path: ./downloaded-artifacts/gs101.zip
+            asset_name: gs101.zip
+            asset_content_type: application/zip
+
+        - name: Display Files Uploaded
+          run: |
+            echo "GitHub release created with the following files:"
+            ls ./downloaded-artifacts/
