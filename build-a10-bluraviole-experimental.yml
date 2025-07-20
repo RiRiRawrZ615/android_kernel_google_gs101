@@ -1,0 +1,500 @@
+name: Build Kernel - Android 10 Bluraviole (Experimental)
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      make_release:
+        description: 'Create a GitHub release'
+        required: true
+        type: boolean
+        default: true
+      android_version:
+        description: 'Android version'
+        required: true
+        type: string
+        default: "android10"
+      kernel_version:
+        description: 'Kernel version'
+        required: true
+        type: string
+        default: "5.10"
+      sub_level:
+        description: 'Kernel sub-level'
+        required: true
+        type: string
+        default: "123"
+      os_patch_level:
+        description: 'OS patch level'
+        required: true
+        type: string
+        default: "2023-11"
+      kernelsu_variant:
+        description: 'KernelSU variant'
+        required: true
+        type: string
+        default: "Next"
+      kernelsu_branch:
+        description: 'KernelSU branch (Dev or Other)'
+        required: true
+        type: choice
+        options:
+          - Dev
+          - Other
+        default: "Dev"
+      kernelsu_branch_other:
+        description: 'Custom KernelSU branch (required if kernelsu_branch is Other)'
+        required: false
+        type: string
+        default: ""
+      kernelsu_commit_hash:
+        description: 'Specify the GitHub commit hash for KernelSU Next (e.g., 3fd61ee5ee5e6fe941a89294ac26aa752b61)'
+        required: false
+        type: string
+        default: ""
+      susfs_commit_hash:
+        description: 'Specify the GitLab commit hash for SUSFS (e.g., a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6)'
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      make_release:
+        required: true
+        type: boolean
+        default: true
+      android_version:
+        required: true
+        type: string
+      kernel_version:
+        required: true
+        type: string
+      sub_level:
+        required: true
+        type: string
+      os_patch_level:
+        required: true
+        type: string
+      kernelsu_variant:
+        required: true
+        type: string
+      kernelsu_branch:
+        required: true
+        type: string
+        default: "Dev"
+      kernelsu_branch_other:
+        required: false
+        type: string
+        default: ""
+      kernelsu_commit_hash:
+        required: false
+        type: string
+        default: ""
+      susfs_commit_hash:
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  build-gki:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+
+    steps:
+      - name: Maximize build space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 2048
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+
+      - name: Set CONFIG Environment Variable
+        run: |
+          CONFIG="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}"
+          echo "CONFIG=$CONFIG" >> $GITHUB_ENV
+          echo "CONFIG set to: $CONFIG"
+
+      - name: Install ccache
+        run: sudo apt update && sudo apt install -y ccache
+
+      - name: Set up ccache
+        run: |
+          mkdir -p ~/.cache/bazel
+          ccache --version
+          ccache --max-size=2G
+          ccache --set-config=compression=true
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+
+      - name: Restore ccache from cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.sub_level }}-ccache-
+
+      - name: Cache toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            kernel-build-tools
+            mkbootimg
+          key: toolchain-${{ runner.os }}-v1
+
+      - name: Download toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          AOSP_MIRROR=https://android.googlesource.com
+          BRANCH=main-kernel-build-2024
+          git clone $AOSP_MIRROR/kernel/prebuilts/build-tools -b $BRANCH --depth 1 kernel-build-tools
+          git clone $AOSP_MIRROR/platform/system/tools/mkbootimg -b $BRANCH --depth 1 mkbootimg
+
+      - name: Set environment variables
+        run: |
+          echo "AVBTOOL=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/bin/avbtool" >> $GITHUB_ENV
+          echo "MKBOOTIMG=$GITHUB_WORKSPACE/mkbootimg/mkbootimg.py" >> $GITHUB_ENV
+          echo "UNPACK_BOOTIMG=$GITHUB_WORKSPACE/mkbootimg/unpack_bootimg.py" >> $GITHUB_ENV
+
+      - name: Set boot sign key
+        env:
+          BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
+        run: |
+          if [ ! -z "$BOOT_SIGN_KEY" ]; then
+            echo "$BOOT_SIGN_KEY" > ./kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
+            echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+          else
+            echo "BOOT_SIGN_KEY is not set. Exiting..."
+            exit 1
+          fi
+
+      - name: Install Repo
+        run: |
+          mkdir -p ./git-repo
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ./git-repo/repo
+          chmod a+rx ./git-repo/repo
+          echo "REPO=$GITHUB_WORKSPACE/./git-repo/repo" >> $GITHUB_ENV
+
+      - name: Clone AnyKernel3 and Other Dependencies
+        run: |
+          SUSFS_BRANCH="gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}"
+          echo "Using branch for SUSFS: $SUSFS_BRANCH"
+          mkdir -p "$CONFIG/AnyKernel3"
+          git clone https://github.com/WildPlusKernel/AnyKernel3.git -b "gki-2.0" "$CONFIG/AnyKernel3"
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/RiRiRawrZ615/kernel_patches.git
+
+      - name: Initialize and Sync Kernel Source
+        run: |
+          mkdir -p "$CONFIG"
+          cd "$CONFIG"
+          FORMATTED_BRANCH="${{ inputs.android_version }}-${{ inputs.kernel_version }}-${{ inputs.os_patch_level }}"
+          $REPO init --depth=1 --u https://android.googlesource.com/kernel/manifest -b common-${FORMATTED_BRANCH} --repo-rev=v2.16
+          REMOTE_BRANCH=$(git ls-remote https://android.googlesource.com/kernel/common ${FORMATTED_BRANCH})
+          DEFAULT_MANIFEST_PATH=.repo/manifests/default.xml
+          if grep -q deprecated <<< $REMOTE_BRANCH; then
+            echo "Found deprecated branch: $FORMATTED_BRANCH"
+            sed -i "s/\"${FORMATTED_BRANCH}\"/\"deprecated\/${FORMATTED_BRANCH}\"/g" $DEFAULT_MANIFEST_PATH
+          fi
+          $REPO --version
+          $REPO --trace sync -c -j$(nproc --all) --no-tags --fail-fast
+
+      - name: Determine the branch for KernelSU
+        run: |
+          if [ "${{ inputs.kernelsu_branch }}" == "Dev" ]; then
+            echo "BRANCH=-s next" >> $GITHUB_ENV
+          elif [ "${{ inputs.kernelsu_branch }}" == "Other" ] && [ -n "${{ inputs.kernelsu_branch_other }}" ]; then
+            echo "BRANCH=-s ${{ inputs.kernelsu_branch_other }}" >> $GITHUB_ENV
+          else
+            echo "Error: Custom branch not provided for 'Other'" >&2
+            exit 1
+          fi
+
+      - name: Add KernelSU
+        run: |
+          cd "$CONFIG"
+          KSU_COMMIT_HASH="${{ inputs.kernelsu_commit_hash }}"
+          if [ -z "$KSU_COMMIT_HASH" ]; then
+            KSU_COMMIT_HASH=$(curl -s https://api.github.com/repos/KernelSU-Next/KernelSU-Next/commits/next | jq -r '.sha' | head -c 40)
+          fi
+          echo "Using KernelSU commit: $KSU_COMMIT_HASH"
+          git checkout $KSU_COMMIT_HASH
+          echo "Adding KernelSU Next..."
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+
+      - name: Apply SUSFS Patches for KernelSU Next
+        run: |
+          cd "$CONFIG"
+          SUSFS_COMMIT_HASH="${{ inputs.susfs_commit_hash }}"
+          if [ -z "$SUSFS_COMMIT_HASH" ]; then
+            SUSFS_COMMIT_HASH=$(git ls-remote https://gitlab.com/simonpunk/susfs4ksu.git refs/heads/gki-android10-5.10 | awk '{ print $1 }')
+          fi
+          echo "Using SUSFS commit: $SUSFS_COMMIT_HASH"
+          cd ../susfs4ksu
+          git checkout $SUSFS_COMMIT_HASH
+          cd ../$CONFIG
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch ./common/
+          cd common
+          patch -p1 --forward --fuzz=3 < 50_add_susfs_in_gki-${{ inputs.android_version }}-${{ inputs.kernel_version }}.patch
+          cd ..
+          cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+          cd ./KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_apk_sign.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_apk_sign.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_core_hook.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_core_hook.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_selinux.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_selinux.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_ksud.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_ksud.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_rules.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_rules.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
+          cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
+          patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+
+      - name: Apply Hooks Patches
+        run: |
+          cd "$CONFIG/common"
+          cp ../../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
+          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
+
+      - name: Apply Hide Stuff Patches
+        run: |
+          cd "$CONFIG/common"
+          cp ../../kernel_patches/69_hide_stuff.patch ./
+          patch -p1 -F 3 < 69_hide_stuff.patch
+
+      - name: Add Configuration Settings
+        run: |
+          cd "$CONFIG"
+          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TMPFS_XATTR=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TMPFS_POSIX_ACL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP_NF_TARGET_TTL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP6_NF_TARGET_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_IP6_NF_MATCH_HL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CPU_FREQ_GOV_WALT=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CPU_FREQ_GOV_SCHEDUTIL=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_ADVANCED=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_BBR=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_NET_SCH_FQ=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_BIC=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_WESTWOOD=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_TCP_CONG_HTCP=n" >> ./common/arch/arm64/configs/gki_defconfig
+          sed -i 's/check_defconfig//' ./common/build.config.gki
+
+      - name: Config Kernel Name
+        run: |
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+
+          perl -pi -e 's|echo "\$res"|echo "-android10-8-00008-g3ca6a2912c7e-ab11087001"|' ./common/scripts/setlocalversion
+
+          perl -pi -e 's{UTS_VERSION="\$\(echo \$UTS_VERSION \$CONFIG_FLAGS \$TIMESTAMP \| cut -b -\$UTS_LEN\)"}{UTS_VERSION="#1 SMP PREEMPT Sat Nov 11 06:58:10 UTC 2023"}' ./common/scripts/mkcompile_h
+
+      - name: Build with retry
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          retry_on: timeout
+          command: |
+            set -e
+            set -x
+            cd "$CONFIG"
+            if [ -f "build/build.sh" ]; then
+              LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh CC="/usr/bin/ccache clang" || exit 1
+            else
+              tools/bazel build --disk_cache=/home/runner/.cache/bazel --config=fast --lto=thin //common:kernel_aarch64_dist || exit 1
+            fi
+            ccache --show-stats
+
+      - name: Create Boot Images and ZIP Files
+        run: |
+          echo "===== Starting Boot Image and ZIP Creation ====="
+          cd "$CONFIG"
+
+          # 1. Create bootimgs directory and copy files
+          echo "Copying kernel images..."
+          mkdir -p bootimgs
+          
+          # Copy from dist/ (primary location)
+          cp -v ./out/android10-5.10/dist/boot.img ./bootimgs/ || { echo "ERROR: boot.img missing in dist/"; exit 1; }
+          cp -v ./out/android10-5.10/dist/boot-gz.img ./bootimgs/boot-gz.img || { echo "ERROR: boot-gz.img missing"; exit 1; }
+          cp -v ./out/android10-5.10/dist/boot-lz4.img ./bootimgs/boot-lz4.img || { echo "ERROR: boot-lz4.img missing"; exit 1; }
+
+          # Fallback: Copy from arch/arm64/boot if needed
+          [ -f ./bootimgs/Image ] || cp -v ./out/android10-5.10/common/arch/arm64/boot/Image ./bootimgs/ || { echo "ERROR: Image missing everywhere"; exit 1; }
+          [ -f ./bootimgs/Image.gz ] || cp -v ./out/android10-5.10/common/arch/arm64/boot/Image.gz ./bootimgs/ || true
+          [ -f ./bootimgs/Image.lz4 ] || cp -v ./out/android10-5.10/common/arch/arm64/boot/Image.lz4 ./bootimgs/ || true
+
+          # 2. Prepare files for AnyKernel3
+          echo "Preparing AnyKernel3 files..."
+          cp -v ./bootimgs/Image ./Image || { echo "ERROR: Failed to copy Image"; exit 1; }
+          cp -v ./bootimgs/Image.gz ./Image.gz || { echo "WARNING: Image.gz not available"; }
+          cp -v ./bootimgs/Image.lz4 ./Image.lz4 || { echo "WARNING: Image.lz4 not available"; }
+
+          # 3. Create ZIP files
+          echo "Creating ZIP archives..."
+          mkdir -p release
+          cd AnyKernel3
+
+          # Get KernelSU version or use default
+          KSUVER=$(cat ../KernelSU-Next/version 2>/dev/null || echo "v0.0.0")
+          echo "Using KernelSU version: $KSUVER"
+
+          # Create ZIP for each format (only proceed if source exists)
+          if [ -f ../Image ]; then
+            echo "Create standard ZIP..."
+            mv ../Image ./Image
+            zip -r9 "../release/Next-$KSUVER-android10-5.10.123-AnyKernel3.zip" ./*
+            rm -f ./Image
+          fi
+
+          if [ -f ../Image.gz ]; then
+            echo "Creating GZIP ZIP..."
+            mv ../Image.gz ./Image.gz
+            zip -r9 "../release/Next-$KSUVER-android10-5.10.123-AnyKernel3-gz.zip" ./*
+            rm -f ./Image.gz
+          fi
+
+          if [ -f ../Image.lz4 ]; then
+            echo "Creating LZ4 ZIP..."
+            mv ../Image.lz4 ./Image.lz4
+            zip -r9 "../release/Next-$KSUVER-android10-5.10.123-AnyKernel3-lz4.zip" ./*
+            rm -f ./Image.lz4
+          fi
+
+          # 4. Verify outputs
+          echo "Final artifacts:"
+          ls -lh ../release/
+          [ "$(ls -A ../release/)" ] || { echo "ERROR: No ZIP files created!"; exit 1; }
+
+          echo "===== Boot Image and ZIP Creation Complete ====="
+
+      - name: Android 10/14/15 boot image build script
+        run: |
+          cd "$CONFIG/bootimgs"
+
+          # Create gzip of the Image file
+          gzip -n -k -f -9 ./Image > ./Image.gz
+          
+          echo "Building boot.img"
+          $MKBOOTIMG --header_version 4 --kernel Image --output boot.img
+          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
+          cp ./boot.img "../${{ inputs.kernelsu_variant }}-$KSUVER-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-boot.img"
+          
+          echo "Building boot-gz.img"
+          $MKBOOTIMG --header_version 4 --kernel Image.gz --output boot-gz.img
+          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-gz.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
+          cp ./boot-gz.img "../${{ inputs.kernelsu_variant }}-$KSUVER-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-boot-gz.img"
+          
+          echo "Building boot-lz4.img"
+          $MKBOOTIMG --header_version 4 --kernel Image.lz4 --output boot-lz4.img
+          $AVBTOOL add_hash_footer --partition_name boot --partition_size $((64 * 1024 * 1024)) --image boot-lz4.img --algorithm SHA256_RSA2048 --key $BOOT_SIGN_KEY_PATH
+          cp ./boot-lz4.img "../${{ inputs.kernelsu_variant }}-$KSUVER-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}-boot-lz4.img"
+
+      - name: Compress all img files with gzip
+        run: |
+          cd "$CONFIG/bootimgs"
+          for image in *.img; do
+            if [ -f "$image" ]; then
+              gzip -vnf9 "$image" -c > "${image}.gz"
+            fi
+          done
+          echo "Listing bootimgs directory after compression:"
+          ls -l .
+
+      - name: Create Release
+        if: ${{ inputs.make_release }}
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          files: ${{ env.CONFIG }}/release/*.zip
+          tag_name: ${{ inputs.kernelsu_variant }}-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}
+          name: Release ${{ inputs.kernelsu_variant }}-${{ inputs.android_version }}-${{ inputs.kernel_version }}.${{ inputs.sub_level }}-${{ inputs.os_patch_level }}
+          draft: false
+          prerelease: false
+
+      - name: Upload Build Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.CONFIG }}
+          path: |
+            ${{ env.CONFIG }}/release/*.zip
+            ${{ env.CONFIG }}/bootimgs/*.img.gz
+            ${{ env.CONFIG }}/bootimgs/boot.img
+            ${{ env.CONFIG }}/bootimgs/boot-gz.img
+            ${{ env.CONFIG }}/bootimgs/boot-lz4.img
+            ${{ env.CONFIG }}/*-boot.img
+            ${{ env.CONFIG }}/Image*
+            ./out/android10-5.10/dist/*.img
+            ./out/android10-5.10/dist/*.tar.gz
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Check for .rej files
+        if: failure()
+        run: |
+          echo "::group::Checking for .rej files..."
+          REJ_FILES=$(find . -name '*.rej')
+          if [ -z "$REJ_FILES" ]; then
+            echo "No .rej files found."
+          else
+            echo "Found .rej files:"
+            echo "$REJ_FILES"
+            for f in $REJ_FILES; do
+              echo "--- $f ---"
+              cat "$f"
+            done
+          fi
+          echo "::endgroup::"
+
+      - name: Upload .rej files as artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: patch-rejects
+          path: "**/*.rej"
+          if-no-files-found: warn
+          compression-level: 6
+          overwrite: false
+          include-hidden-files: false
