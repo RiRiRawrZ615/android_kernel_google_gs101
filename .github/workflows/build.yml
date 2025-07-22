@@ -90,13 +90,13 @@ jobs:
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
               patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
-              patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch   
+              patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+
+              cd ..
+              patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true   
               
               curl -Ls "https://raw.githubusercontent.com/fatalcoder524/kernel_patches_additional/refs/heads/main/random_qstr.patch" | patch -p1 --forward
         
-          # Change to common directory and apply SUSFS patch
-          cd ..
-          patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
       
       - name: Apply KSU Hooks
         run: |
