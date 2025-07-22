@@ -1,4 +1,4 @@
-name: Build BluRaviole Pixel 6 Kernel STABLE
+name: Build BluRaviole Pixel 6 Kernel STABLE 
 
 on:
   workflow_dispatch:
@@ -69,10 +69,6 @@ jobs:
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.10.patch ./
           cp ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
-              cd common
-              patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
-              curl -Ls "https://raw.githubusercontent.com/fatalcoder524/kernel_patches_additional/refs/heads/main/random_qstr.patch" | patch -p1 --forward
-              
           echo "Applying SUSFS patches for KernelSU Next..."
               cd ./KernelSU-Next
               cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
@@ -94,7 +90,11 @@ jobs:
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_sucompat.c.patch ./
               patch -p1 --forward --fuzz=3 < fix_sucompat.c.patch
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
-              patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch    
+              patch -p1 --forward --fuzz=3 < fix_kernel_compat.c.patch
+        
+          # Change to common directory and apply SUSFS patch
+          cd ..
+          patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
       
       - name: Apply KSU Hooks
         run: |
@@ -113,7 +113,6 @@ jobs:
           # Apply additional patch
           cp ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
-
       - name: Apply KernelSU & SUSFS SUltan Fixes
         run: |
           echo "Changing to configuration directory: $CONFIG..."
