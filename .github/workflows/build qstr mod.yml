@@ -95,6 +95,7 @@ jobs:
           # Change to common directory and apply SUSFS patch
           cd ..
           patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
+          curl -Ls "https://raw.githubusercontent.com/fatalcoder524/kernel_patches_additional/refs/heads/main/random_qstr.patch" | patch -p1 --forward
       
       - name: Apply KSU Hooks
         run: |
