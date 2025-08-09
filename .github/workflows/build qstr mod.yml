@@ -183,6 +183,18 @@ jobs:
       - name: Verify Toolchain
         run: |
           $CC --version
+
+      - name: Config Kernel Name
+        run: |
+          echo "Changing to configuration directory: $CONFIG..."
+          cd "$CONFIG"
+
+          perl -pi -e 's|echo "\$res"|echo "-android13-4-00012-g1217bb583cc5-ab11174560"|' ./common/scripts/setlocalversion
+
+          # Run perl command to modify UTS_VERSION
+          perl -pi -e 's{UTS_VERSION="\$\(echo \$UTS_VERSION \$CONFIG_FLAGS \$TIMESTAMP \| cut -b -\$UTS_LEN\)"}{UTS_VERSION="#1 SMP PREEMPT Mon Dec 4 18:59:42 UTC 2023"}' ./common/scripts/mkcompile_h
+          
+          
       - name: Build the Kernel
         run: |
           echo "Changing to configuration directory: $CONFIG..."
