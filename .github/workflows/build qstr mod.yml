@@ -95,8 +95,8 @@ jobs:
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           # Apply additional patch        
-          cp ../kernel_patches/next/scope_min_manual_hooks_v1.5.patch ./
-          patch -p1 -F 3 < scope_min_manual_hooks_v1.5.patch
+          cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
+          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
           
       - name: Apply Hide Stuff Patches
         run: |
