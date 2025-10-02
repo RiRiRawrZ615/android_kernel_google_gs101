@@ -82,7 +82,7 @@ jobs:
               
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_sucompat.c.patch ./
               patch -p1 --forward < fix_sucompat.c.patch
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.9/fix_kernel_compat.c.patch ./
+              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_kernel_compat.c.patch ./
               patch -p1 --forward < fix_kernel_compat.c.patch
         
           # Change to common directory and apply SUSFS patch
