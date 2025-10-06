@@ -84,6 +84,7 @@ jobs:
               patch -p1 --forward < fix_sucompat.c.patch
               cp ../../kernel_patches/next/susfs_fix_patches/v1.5.10/fix_kernel_compat.c.patch ./
               patch -p1 --forward < fix_kernel_compat.c.patch
+              curl -Ls https://github.com/pershoot/KernelSU-Next/commit/2f3023dca9460fe4febfa4998abe353c9e716390.patch | patch -p1
         
           # Change to common directory and apply SUSFS patch
           cd ..
