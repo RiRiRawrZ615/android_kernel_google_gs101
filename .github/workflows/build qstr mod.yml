@@ -74,18 +74,16 @@ jobs:
               cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
               patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
               
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.11/fix_apk_sign.c.patch ./
+              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_apk_sign.c.patch ./
               patch -p1 --forward < fix_apk_sign.c.patch
               
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.11/fix_core_hook.c.patch ./
+              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_core_hook.c.patch ./
               patch -p1 --forward < fix_core_hook.c.patch
               
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.11/fix_sucompat.c.patch ./
+              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_sucompat.c.patch ./
               patch -p1 --forward < fix_sucompat.c.patch
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.11/fix_kernel_compat.c.patch ./
-              patch -p1 --forward < fix_kernel_compat.c.patch
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.11/pctrl.patch ./
-              patch -p1 --forward < pctrl.patch              
+              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_kernel_compat.c.patch ./
+              patch -p1 --forward < fix_kernel_compat.c.patch           
         
           # Change to common directory and apply SUSFS patch
           cd ..
