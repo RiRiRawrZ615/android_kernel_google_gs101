@@ -56,7 +56,7 @@ jobs:
           cd "$CONFIG"
           
           echo "Adding KernelSU..."
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
       
       - name: Apply SUSFS Patches
         run: |
@@ -89,14 +89,6 @@ jobs:
           cd ..
           patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
           curl -Ls "https://raw.githubusercontent.com/fatalcoder524/kernel_patches_additional/refs/heads/main/random_qstr.patch" | patch -p1 --forward
-      
-      - name: Apply KSU Hooks
-        run: |
-          echo "Changing to configuration directory: $CONFIG..."
-          cd "$CONFIG"
-          # Apply additional patch        
-          cp ../kernel_patches/next/next_hooks.patch ./
-          patch -p1 --fuzz=3 < ./next_hooks.patch
           
       - name: Apply Hide Stuff Patches
         run: |
