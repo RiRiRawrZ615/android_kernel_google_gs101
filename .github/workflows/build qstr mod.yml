@@ -1,4 +1,4 @@
-name: Build BluRaviole Pixel 6 Kernel QSTR
+name: Build BluRaviole Pixel 6 Kernel KSUN 2.0
 
 on:
   workflow_dispatch:
@@ -46,8 +46,8 @@ jobs:
 
           # Clone repositories using the branch names
           git clone https://github.com/RiRiRawrZ615/AnyKernel3.git -b "$ANYKERNEL_BRANCH"
+          git clone https://github.com/WildPlusKernel/AnyKernel3.git -b "gki-2.0" "$CONFIG/AnyKernel3"
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
-          git clone https://github.com/RiRiRawrZ615/kernel_patches.git
           git clone https://github.com/RiRiRawrZ615/android_kernel_google_gs101 -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
       
       - name: Add KernelSU
@@ -56,7 +56,7 @@ jobs:
           cd "$CONFIG"
           
           echo "Adding KernelSU..."
-          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/dev/kernel/setup.sh" | bash -s dev
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/stable/kernel/setup.sh" | bash -s dev
       
       - name: Apply SUSFS Patches
         run: |
@@ -74,22 +74,25 @@ jobs:
               cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
               patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
               
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_apk_sign.c.patch ./
-              patch -p1 --forward < fix_apk_sign.c.patch
-              
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_core_hook.c.patch ./
-              patch -p1 --forward < fix_core_hook.c.patch
-              
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_sucompat.c.patch ./
-              patch -p1 --forward < fix_sucompat.c.patch
-              cp ../../kernel_patches/next/susfs_fix_patches/v1.5.12/fix_kernel_compat.c.patch ./
-              patch -p1 --forward < fix_kernel_compat.c.patch           
+          for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
+            echo "Patching file: $file with fix_$file.patch"
+            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/fix_$file.patch"
+          done
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch"
+          rm -rf ./kernel/tiny_sulog.c
+          cp "../../kernel_patches/next/susfs_fix_patches/v2.0.0/tiny_sulog.c" ./kernel/tiny_sulog.c
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"         
+          
+          # Finally, apply the overwrite hook mode patch (usually last)
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
+
+          # Add Pershoot tracepoint fix for no root
+          curl -Ls https://github.com/pershoot/KernelSU-Next/commit/249d468099c180b7159c240b3f3ecffe8c8d3a6f.patch | patch -p1 || true     
         
           # Change to common directory and apply SUSFS patch
           cd ..
           patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
-          curl -Ls "https://raw.githubusercontent.com/fatalcoder524/kernel_patches_additional/refs/heads/main/random_qstr.patch" | patch -p1 --forward
-          
+ 
       - name: Apply Hide Stuff Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -126,6 +129,7 @@ jobs:
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
           
           # Add SUSFS configuration settings
+          echo "CONFIG_TRACEPOINTS=y" >> ./arch/arm64/configs/gs101_defconfig          
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/gs101_defconfig
