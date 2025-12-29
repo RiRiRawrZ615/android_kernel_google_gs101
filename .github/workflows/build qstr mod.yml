@@ -50,7 +50,8 @@ jobs:
           
           git clone https://github.com/RiRiRawrZ615/android_kernel_google_gs101 -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
           git clone https://github.com/WildPlusKernel/AnyKernel3.git -b "gki-2.0" "$CONFIG/AnyKernel3"  
-          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH" 
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
+          git clone https://github.com/RiRiRawrZ615/kernel_patches.git
           
       - name: Add KernelSU
         run: |
@@ -80,7 +81,7 @@ jobs:
             echo "Patching file: $file with fix_$file.patch"
             patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/fix_$file.patch"
           done
-            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"
           
           # Finally, apply the overwrite hook mode patch (usually last)
           patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
