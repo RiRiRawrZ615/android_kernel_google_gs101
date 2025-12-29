@@ -78,10 +78,7 @@ jobs:
             echo "Patching file: $file with fix_$file.patch"
             patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/fix_$file.patch"
           done
-          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch"
-          rm -rf ./kernel/tiny_sulog.c
-          cp "../../kernel_patches/next/susfs_fix_patches/v2.0.0/tiny_sulog.c" ./kernel/tiny_sulog.c
-          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"         
+            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"         
           
           # Finally, apply the overwrite hook mode patch (usually last)
           patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
