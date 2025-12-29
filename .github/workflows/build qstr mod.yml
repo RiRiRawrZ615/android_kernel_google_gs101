@@ -72,21 +72,18 @@ jobs:
           cp ../susfs4ksu/kernel_patches/fs/* ./fs/
           cp ../susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           echo "Applying SUSFS patches for KernelSU Next..."
-              cd ./KernelSU-Next
-              cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
-              patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
+          cd ./KernelSU-Next
+          cp ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./
+          patch -p1 --forward < 10_enable_susfs_for_ksu.patch || true
               
           for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
             echo "Patching file: $file with fix_$file.patch"
             patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/fix_$file.patch"
           done
-            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"         
+            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"
           
           # Finally, apply the overwrite hook mode patch (usually last)
           patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
-          
-          # Add Pershoot tracepoint fix for no root
-          curl -Ls https://github.com/pershoot/KernelSU-Next/commit/249d468099c180b7159c240b3f3ecffe8c8d3a6f.patch | patch -p1 || true     
           
           # Change to common directory and apply SUSFS patch
           cd ..
@@ -129,7 +126,6 @@ jobs:
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gs101_defconfig
           
           # Add SUSFS configuration settings
-          echo "CONFIG_TRACEPOINTS=y" >> ./arch/arm64/configs/gs101_defconfig          
           echo "CONFIG_KSU_SUSFS=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./arch/arm64/configs/gs101_defconfig
