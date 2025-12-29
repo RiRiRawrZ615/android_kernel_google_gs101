@@ -24,6 +24,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y gcc-aarch64-linux-gnu
+
       - name: Set CONFIG Environment Variable
         run: |
           CONFIG="android_kernel_google_gs101"
@@ -32,18 +33,19 @@ jobs:
           echo "CONFIG=$CONFIG" >> $GITHUB_ENV
           
           echo "CONFIG set to: $CONFIG"
+
       - name: Clone AnyKernel3 and Other Dependencies
         run: |
           echo "Cloning AnyKernel3 and other dependencies..."
-    
+          
           # Define the branch names using the matrix values
           ANYKERNEL_BRANCH="riri"
           SUSFS_BRANCH="gki-android13-5.10"
-
+          
           # Debug print the branches
           echo "Using branch for AnyKernel3: $ANYKERNEL_BRANCH"
           echo "Using branch for SUSFS: $SUSFS_BRANCH"
-
+          
           # Clone repositories using the branch names
           
           git clone https://github.com/RiRiRawrZ615/android_kernel_google_gs101 -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
@@ -57,7 +59,7 @@ jobs:
           
           echo "Adding KernelSU..."
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/stable/kernel/setup.sh" | bash -s dev
-      
+
       - name: Apply SUSFS Patches
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -82,10 +84,10 @@ jobs:
           
           # Finally, apply the overwrite hook mode patch (usually last)
           patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
-
+          
           # Add Pershoot tracepoint fix for no root
           curl -Ls https://github.com/pershoot/KernelSU-Next/commit/249d468099c180b7159c240b3f3ecffe8c8d3a6f.patch | patch -p1 || true     
-        
+          
           # Change to common directory and apply SUSFS patch
           cd ..
           patch -p1 < 50_add_susfs_in_gki-android13-5.10.patch || true
@@ -97,6 +99,7 @@ jobs:
           # Apply additional patch
           cp ../kernel_patches/69_hide_stuff.patch ./
           patch -p1 -F 3 < 69_hide_stuff.patch
+
       - name: Apply KernelSU & SUSFS SUltan Fixes
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -143,6 +146,7 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./arch/arm64/configs/gs101_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gs101_defconfig
+
       - name: Download and Extract Toolchain
         run: |
           TOOLCHAIN_TAR="x86_64-gcc-14.2.0-nolibc-aarch64-linux.tar.gz"
@@ -164,6 +168,7 @@ jobs:
           echo "CC=$TOOLCHAIN_PATH/bin/aarch64-linux-gcc" >> $GITHUB_ENV
           echo "CROSS_COMPILE=$TOOLCHAIN_PATH/bin/aarch64-linux-" >> $GITHUB_ENV
           echo "PATH=$TOOLCHAIN_PATH/bin:$PATH" >> $GITHUB_ENV
+
       - name: Verify Toolchain
         run: |
           $CC --version
@@ -172,13 +177,12 @@ jobs:
         run: |
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
-
+          
           perl -pi -e 's|echo "\$res"|echo "-android13-4-00012-g1217bb583cc5-ab11174560"|' ./scripts/setlocalversion
-
+          
           # Run perl command to modify UTS_VERSION
           perl -pi -e 's{UTS_VERSION="\$\(echo \$UTS_VERSION \$CONFIG_FLAGS \$TIMESTAMP \| cut -b -\$UTS_LEN\)"}{UTS_VERSION="#1 SMP PREEMPT Mon Dec 4 18:59:42 UTC 2023"}' ./scripts/mkcompile_h
-          
-          
+
       - name: Build the Kernel
         run: |
           echo "Changing to configuration directory: $CONFIG..."
@@ -191,6 +195,7 @@ jobs:
           export CC=aarch64-linux-gcc
           make gs101_defconfig -j$(nproc --all)
           make -j$(nproc --all)
+
       #- name: Upload Artifact
       #  uses: actions/upload-artifact@v4
       #  with:
@@ -204,6 +209,7 @@ jobs:
           echo "Copying Image.lz4 and concatenating DTB files..."
           cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
           cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
+
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -236,7 +242,7 @@ jobs:
         -> Kernel Flasher is broken with latest susfs, try https://github.com/libxzr/HorizonKernelFlasher!
         Module: 
         -> https://github.com/sidex15/ksu_module_susfs
-        
+
     steps:
       # Checkout the code
       - name: Checkout code
@@ -255,6 +261,7 @@ jobs:
           echo "KSU_URL=$KSU_URL" >> $GITHUB_ENV
           echo "KernelSU Reference: $KSU_REF"
           echo "KernelSU URL: $KSU_URL"
+
       - name: Get commit hashes and generate commit URLs
         run: |
           GITLAB_OWNER="simonpunk"
@@ -274,6 +281,7 @@ jobs:
               echo "COMMIT_URL_${var_name}=$COMMIT_URL" >> "$GITHUB_ENV"
             fi
           done
+
       - name: Append Commit Hashes & Links to `RELEASE_NOTES` & Append KernelSU-Next Reference to `RELEASE_NOTES`
         run: |
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
@@ -281,7 +289,7 @@ jobs:
           echo "Next Manager:" >> $GITHUB_ENV
           echo "-> https://github.com/KernelSU-Next/KernelSU-Next" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-          
+
       - name: Append Commit Hashes & Links to `RELEASE_NOTES` & Append KernelSU-Next Reference to `RELEASE_NOTES`
         run: |
           echo "RELEASE_NOTES<<EOF" >> $GITHUB_ENV
@@ -296,7 +304,7 @@ jobs:
           echo "gki-android13-5.15: [$COMMIT_HASH_gki_android13_5_15]($COMMIT_URL_gki_android13_5_15)" >> $GITHUB_ENV
           echo "" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-          
+
       # Get the Latest Tag from GitHub
       - name: Generate and Create New Tag
         env:
@@ -319,12 +327,13 @@ jobs:
             # Create the tag in the repository
             git tag $NEW_TAG
             git push --tags
+
       # Download Artifacts for A12 (Only if A12 Build is successful or input is true or empty)
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./downloaded-artifacts
-          
+
       # Create GitHub Release and upload files if make_release is true
       - name: Create GitHub Release
         uses: actions/create-release@v1
@@ -346,6 +355,7 @@ jobs:
               echo "Uploading $file..."
               gh release upload ${{ env.NEW_TAG }} "$file"
           done
+
       # Display Files Uploaded
       - name: Display Files Uploaded
         run: |
