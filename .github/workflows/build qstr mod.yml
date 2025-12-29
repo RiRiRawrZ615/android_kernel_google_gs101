@@ -49,7 +49,7 @@ jobs:
           # Clone repositories using the branch names
           
           git clone https://github.com/RiRiRawrZ615/android_kernel_google_gs101 -b android-gs-bluraviole-5.10-android14-qpr2-monolithic
-          git clone https://github.com/WildPlusKernel/AnyKernel3.git -b "gki-2.0" "$CONFIG/AnyKernel3"  
+          git clone https://github.com/RiRiRawrZ615/AnyKernel3.git -b "riri" "$CONFIG/AnyKernel3"            
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b "$SUSFS_BRANCH"
           git clone https://github.com/RiRiRawrZ615/kernel_patches.git
           
