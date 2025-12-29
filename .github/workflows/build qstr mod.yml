@@ -1,4 +1,4 @@
-name: Build BluRaviole Pixel 6 Kernel KSUN 2.0
+name: Build BluRaviole Pixel 6 Kernel KSUN 3.0
 
 on:
   workflow_dispatch:
