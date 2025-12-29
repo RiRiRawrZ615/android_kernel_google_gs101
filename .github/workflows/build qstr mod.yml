@@ -204,14 +204,14 @@ jobs:
           echo "Changing to configuration directory: $CONFIG..."
           cd "$CONFIG"
           echo "Copying Image.lz4 and concatenating DTB files..."
-          cp ./out/arch/arm64/boot/Image.lz4 ../AnyKernel3/Image.lz4
-          cp ./out/arch/arm64/boot/dts/google/dtbo.img ../AnyKernel3/dtbo.img
+          cp ./out/arch/arm64/boot/Image.lz4 ./AnyKernel3/Image.lz4
+          cp ./out/arch/arm64/boot/dts/google/dtbo.img ./AnyKernel3/dtbo.img
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-gs101
-          path: ./AnyKernel3/
+          path: ./${{ env.CONFIG }}/AnyKernel3/
 
   trigger-release:
     runs-on: ubuntu-latest
