@@ -79,12 +79,12 @@ jobs:
               
           for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
             echo "Patching file: $file with fix_$file.patch"
-            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/fix_$file.patch"
+            patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.1.0/fix_$file.patch"
           done
-          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/ksu_toolkit.patch"
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.1.0/ksu_toolkit.patch"
           
           # Finally, apply the overwrite hook mode patch (usually last)
-          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.0.0/overwrite_hook_mode.patch" || true
+          patch -p1 --forward < "../../kernel_patches/next/susfs_fix_patches/v2.1.0/overwrite_hook_mode.patch" || true
           
           # Change to common directory and apply SUSFS patch
           cd ..
